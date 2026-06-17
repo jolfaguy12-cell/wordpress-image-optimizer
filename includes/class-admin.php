@@ -53,7 +53,7 @@ class Woo_Image_Optimizer_Admin {
 	}
 
 	public function enqueue_scripts( string $hook ): void {
-		if ( 'media_page_woo-image-optimizer' !== $hook ) {
+		if ( 'media_page_woo-image-optimizer' !== $hook && 'upload' !== $hook ) {
 			return;
 		}
 
