@@ -1,6 +1,8 @@
-# WordPress Image Optimizer
+# WooCommerce Image Optimizer
 
-Lightweight, self-hosted WordPress plugin for image compression and WebP conversion. No external API, no subscription, no file size limits. Works entirely on your server using PHP's built-in Imagick and GD libraries.
+WordPress plugin that converts WooCommerce product images to WebP using a remote processing server. Queue-based and async — zero processing overhead on page loads. No server-side PHP extensions required.
+
+**Version:** 2.0.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+
 
 ---
 
@@ -8,97 +10,59 @@ Lightweight, self-hosted WordPress plugin for image compression and WebP convers
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        ENTRY POINTS                                     │
+│                         WORDPRESS (Server 1)                            │
 │                                                                         │
-│   ┌──────────────┐   ┌──────────────┐   ┌──────────────────────────┐   │
-│   │  Image Upload │   │  Admin UI    │   │  WP-CLI                  │   │
-│   │  (wp-admin)  │   │  Bulk Button │   │  wp bdsk-optimizer bulk  │   │
-│   └──────┬───────┘   └──────┬───────┘   └────────────┬─────────────┘   │
-│          │                  │                         │                 │
-└──────────┼──────────────────┼─────────────────────────┼─────────────────┘
-           │                  │                         │
-           ▼                  ▼                         ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        PLUGIN CORE                                      │
+│   Image upload / product save                                           │
+│          │                                                              │
+│          ▼                                                              │
+│   class-woocommerce.php                                                 │
+│   • hooks: updated_post_meta(_thumbnail_id, _product_image_gallery)     │
+│   • skip rules: AVIF, already-done, non-product images                  │
+│          │                                                              │
+│          ▼                                                              │
+│   {prefix}woo_optimizer_queue   ← MySQL queue table                    │
+│   ┌────────────┬───────────┬──────────┬──────────┬──────────────────┐  │
+│   │ attachment │ product   │ status   │ attempts │ error_msg        │  │
+│   │ _id        │ _id       │ pending  │ 0–3      │ null             │  │
+│   └────────────┴───────────┴──────────┴──────────┴──────────────────┘  │
+│          │                                                              │
+│          ▼  (every 60 seconds, transient lock)                          │
+│   class-cron.php → class-processor.php                                 │
+│          │                                                              │
+│          │  1. POST /backup  ─────────────────────────────────────────► │
+│          │  2. POST /optimize ────────────────────────────────────────► │
+│          │  3. Decode base64 WebP → write to disk                       │
+│          │  4. Delete original .jpg/.png                                │
+│          │  5. class-db-updater.php → update all WP metadata            │
+│          │  6. Mark queue row: done                                     │
 │                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  class-bulk.php                                                  │   │
-│  │                                                                  │   │
-│  │  • wp_generate_attachment_metadata  →  auto_optimize()           │   │
-│  │  • wp_ajax_bdsk_optimizer_bulk      →  ajax_bulk()               │   │
-│  │  • wp_ajax_bdsk_optimizer_single    →  ajax_single()             │   │
-│  │  • wp_ajax_bdsk_optimizer_restore   →  ajax_restore()            │   │
-│  └────────────────────────────┬─────────────────────────────────────┘   │
-│                               │                                         │
-│                               ▼                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  class-engine.php  (core optimizer)                              │   │
-│  │                                                                  │   │
-│  │  optimize_attachment( $id )                                      │   │
-│  │       │                                                          │   │
-│  │       ├── 1. Validate file + MIME type                           │   │
-│  │       ├── 2. Backup original  ──────────────────────────────┐    │   │
-│  │       ├── 3. optimize_file( original )                      │    │   │
-│  │       │       └── optimize_file( each thumbnail size )      │    │   │
-│  │       └── 4. Save results to postmeta (_bdsk_optimizer)     │    │   │
-│  │                                                             │    │   │
-│  │  ┌──────────────────────────┐  ┌─────────────────────────┐ │    │   │
-│  │  │  process_imagick()       │  │  process_gd()  fallback │ │    │   │
-│  │  │  (primary engine)        │  │                         │ │    │   │
-│  │  │                          │  │  • imagecreatefromjpeg  │ │    │   │
-│  │  │  • autoOrient()          │  │  • imagecreatefrompng   │ │    │   │
-│  │  │  • stripImage() (EXIF)   │  │  • imagejpeg( quality ) │ │    │   │
-│  │  │  • thumbnailImage()      │  │  • imagepng( compress ) │ │    │   │
-│  │  │  • setCompression()      │  │  • imagewebp()          │ │    │   │
-│  │  │  • setInterlace (prog.)  │  │  • imagedestroy()       │ │    │   │
-│  │  │  • writeImage()          │  └─────────────────────────┘ │    │   │
-│  │  │  • clone → WebP          │                               │    │   │
-│  │  └──────────────────────────┘                               │    │   │
-│  └─────────────────────────────────────────────────────────────┼────┘   │
-│                                                                │        │
-└────────────────────────────────────────────────────────────────┼────────┘
-                                                                 │
-           ┌─────────────────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        FILE SYSTEM OUTPUT                               │
-│                                                                         │
-│  wp-content/uploads/2026/06/                                            │
-│  ├── product.jpg              ← compressed original (EXIF stripped)     │
-│  ├── product.webp             ← WebP version (50–70% smaller)           │
-│  ├── product-300x300.jpg      ← thumbnail compressed                    │
-│  ├── product-300x300.webp     ← thumbnail WebP                          │
-│  ├── product-600x600.jpg                                                │
-│  ├── product-600x600.webp                                               │
-│  └── ... (all registered sizes)                                         │
-│                                                                         │
-│  wp-content/uploads/bdsk-optimizer-backups/                             │
-│  └── 5968_product.jpg         ← original backup (restorable)           │
+│   Retry: attempts < 3 → back to pending | attempts = 3 → failed        │
 └─────────────────────────────────────────────────────────────────────────┘
-           │
-           ▼
+                    │ HTTP (Bearer token)
+                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        SERVING LAYER                                    │
+│                    SERVER 2 API  (server2-api/)                         │
 │                                                                         │
-│  Browser requests: <img src="product.jpg">                              │
+│   POST /backup          Store original file → return backup_key (UUID)  │
+│   POST /optimize        Convert to WebP (Pillow) → return base64        │
+│   GET  /backup/{key}    Download original binary (for restore)          │
+│   DELETE /backup/{key}  Remove stored backup                            │
 │                                                                         │
-│  class-webp.php intercepts WordPress image filters:                     │
+│   Auth: Authorization: Bearer {WOO_IMG_API_KEY}                        │
+│   Storage: configurable directory, UUID-keyed, path-traversal safe      │
+└─────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         FILE SYSTEM (Server 1)                          │
 │                                                                         │
-│  ┌────────────────────────────────────────────────────────────────┐     │
-│  │  Does browser send "Accept: image/webp"?                       │     │
-│  │                                                                │     │
-│  │  YES → Does product.webp exist on disk?                        │     │
-│  │          YES → serve product.webp  (50–70% smaller)            │     │
-│  │          NO  → serve product.jpg   (compressed)                │     │
-│  │                                                                │     │
-│  │  NO  → serve product.jpg  (compressed original)               │     │
-│  └────────────────────────────────────────────────────────────────┘     │
+│   wp-content/uploads/2026/06/                                           │
+│   ├── product.webp             ← replaces original                      │
+│   ├── product-300x300.webp     ← regenerated thumbnail                  │
+│   └── product-600x600.webp                                              │
 │                                                                         │
-│  Filters hooked:                                                        │
-│  • wp_get_attachment_image_src    (single image)                        │
-│  • wp_get_attachment_url          (direct URL)                          │
-│  • wp_calculate_image_srcset      (responsive srcset)                   │
+│   Original .jpg/.png deleted after successful optimization.             │
+│   Originals backed up permanently on Server 2 (restorable any time).   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -106,55 +70,41 @@ Lightweight, self-hosted WordPress plugin for image compression and WebP convers
 
 ## How It Works
 
-### On Image Upload (automatic)
+### On Image Upload or Product Save (automatic)
 
-1. WordPress uploads the image and generates thumbnails
-2. The `wp_generate_attachment_metadata` hook fires
-3. The plugin reads your settings (quality, max dimensions, WebP on/off)
-4. The engine backs up the original file
-5. Imagick (or GD if Imagick is unavailable) compresses the original and every thumbnail
-6. A `.webp` copy is generated for each file
-7. Results (bytes saved, engine used, timestamp) are stored in the attachment's postmeta
+1. `_thumbnail_id` or `_product_image_gallery` postmeta is updated
+2. `class-woocommerce.php` checks skip rules (AVIF, already done, non-product)
+3. Attachment is added to the MySQL queue as `pending`
 
-### On Bulk Optimization
+### Queue Processing (WP-Cron, every 60 seconds)
 
-The bulk optimizer works through small AJAX batches to avoid PHP timeouts:
+1. Cron tick acquires a 25-second transient lock (prevents overlapping runs)
+2. Batch of `batch_size` pending jobs is picked up
+3. For each job:
+   - Original file POSTed to `/backup` → `backup_key` stored in postmeta immediately (retry-safe)
+   - Original file POSTed to `/optimize` → base64 WebP returned
+   - WebP decoded and written to disk alongside original
+   - Original `.jpg`/`.png` deleted
+   - All WordPress metadata updated: `_wp_attached_file`, `post_mime_type`, attachment sizes
+   - Old `.jpg`/`.png` thumbnail size files deleted
+   - Queue row marked `done`
 
-```
-Browser                    WordPress (AJAX)              Engine
-   │                            │                           │
-   │── click "Optimize" ──────►│                           │
-   │                            │── get 5 unoptimized IDs  │
-   │                            │── optimize each ────────►│
-   │                            │◄─ results ───────────────│
-   │◄─ progress update ─────────│                           │
-   │                            │                           │
-   │── (200ms delay) ──────────►│                           │
-   │                            │── next batch ────────────►│
-   │                            │◄─ results ────────────────│
-   │◄─ progress update ─────────│                           │
-   │                            │                           │
-   │   ... repeats until done ...                           │
-   │                            │                           │
-   │◄─ "All images optimized!" ─│                           │
-```
+### Restore Flow
 
-### On Page Load (WebP serving)
+1. Admin clicks Restore (media library column) or runs `wp woo-optimizer restore <id>`
+2. Plugin calls `GET /backup/{key}` → downloads original binary
+3. Original written back to filesystem; WebP and WebP thumbnails deleted
+4. All WordPress metadata reset to original values; `_woo_optimizer_*` postmeta cleared
+5. Queue row deleted
 
-```
-Visitor browser                WordPress PHP              Disk
-      │                             │                      │
-      │── GET /product-page ───────►│                      │
-      │                             │── build image URLs   │
-      │                             │── check Accept header│
-      │                             │   "image/webp" ✓     │
-      │                             │── check .webp exists ►│
-      │                             │◄─ YES ───────────────│
-      │◄── HTML with .webp URLs ────│                      │
-      │                             │                      │
-      │── GET product.webp ────────────────────────────────►
-      │◄── 174KB instead of 574KB ──────────────────────────
-```
+---
+
+## Skip Rules
+
+An attachment is never queued if:
+- MIME type is `image/avif` or file extension is `.avif`
+- `_woo_optimizer_status = done` already set on the attachment
+- Not referenced by any WooCommerce product (`_thumbnail_id` on product/variation, or `_product_image_gallery`)
 
 ---
 
@@ -162,84 +112,90 @@ Visitor browser                WordPress PHP              Disk
 
 | Feature | Details |
 |---------|---------|
-| **Compression engine** | Imagick (primary) with GD fallback |
-| **Formats** | JPEG, PNG, GIF |
-| **WebP conversion** | Generates `.webp` alongside original for every size |
-| **WebP serving** | PHP filter swaps URLs for supporting browsers automatically |
-| **Thumbnail optimization** | Compresses all WordPress-registered sizes (thumbnail, medium, large, WooCommerce sizes, etc.) |
-| **Auto-optimize on upload** | Optional — fires on `wp_generate_attachment_metadata` |
-| **Bulk optimizer** | AJAX batch processing with live progress bar, pause/resume |
-| **Backup & restore** | Originals saved to `bdsk-optimizer-backups/`, restorable per-image |
-| **EXIF stripping** | Removes metadata (camera model, GPS, etc.) to reduce file size |
-| **Resize on upload** | Optional max width/height limit applied before compression |
-| **Compression modes** | Lossy (default) / Lossless / Ultra-Lossy |
-| **Media library column** | Shows per-image savings and one-click optimize button |
-| **WP-CLI** | Full CLI support for server-side bulk processing |
-| **No external API** | Runs entirely on your server — no account, no limits, no cost |
-
----
-
-## Compression Modes
-
-| Mode | JPEG Quality | Best For |
-|------|-------------|----------|
-| **Lossy** (default) | 82 | Best balance — visually identical to original, 10–30% smaller |
-| **Ultra-Lossy** | ~62 | Maximum size reduction — slight quality drop visible on close inspection |
-| **Lossless** | 100 | No quality loss — files may be larger than original, use for product images where accuracy matters |
-
-WebP quality is set separately (default 80). WebP at 80 is visually equivalent to JPEG at ~88.
+| **Scope** | WooCommerce product images only (featured image, gallery, variation thumbnails) |
+| **Processing** | Remote — all compression on Server 2, zero PHP load on WordPress |
+| **Queue** | MySQL table, no Redis required |
+| **Retry logic** | Up to 3 attempts per image before marking failed |
+| **Restore** | One-click restore from Server 2 backup at any time |
+| **Auto-queue on upload** | Queues new product images as soon as they're attached |
+| **Bulk enqueue** | Admin UI or CLI enqueues all unoptimized product images at once |
+| **Media library column** | Shows savings (KB), status badge, Restore button per image |
+| **WP-CLI** | Full CLI for manual processing and scripting |
+| **AVIF safe** | AVIF images are always skipped |
 
 ---
 
 ## Requirements
 
 - WordPress 6.0+
+- WooCommerce 8.0+
 - PHP 8.1+
-- **Imagick** PHP extension (recommended) OR **GD** with WebP support
-- Write permission to `wp-content/uploads/`
-
-To check what's available on your server:
-
-```bash
-php -r "echo class_exists('Imagick') ? 'Imagick: YES' : 'Imagick: NO'; echo PHP_EOL; echo function_exists('imagewebp') ? 'GD WebP: YES' : 'GD WebP: NO';"
-```
+- MySQL queue table (created automatically on plugin activation)
+- Server 2 API running and reachable (see `server2-api/`)
 
 ---
 
 ## Installation
 
-1. Upload the `wordpress-image-optimizer` folder to `wp-content/plugins/`
-2. Activate via **WP Admin → Plugins**
-3. Go to **Media → WordPress Image Optimizer**
-4. Click **"Optimize X Remaining Images"** to bulk-process existing images
+### 1. Deploy the WordPress plugin
 
-New images uploaded after activation are optimized automatically.
+```bash
+cp -r wordpress-image-optimizer /var/www/yoursite/wp-content/plugins/
+```
+
+Activate via **WP Admin → Plugins → WooCommerce Image Optimizer**.
+
+On activation the plugin creates the `{prefix}woo_optimizer_queue` table and registers the WP-Cron schedule.
+
+### 2. Set up the Server 2 API
+
+```bash
+cd server2-api/
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Generate an API key
+python3 -c "import secrets; print(secrets.token_hex(32))"
+
+# Start (replace YOUR_KEY)
+WOO_IMG_API_KEY=YOUR_KEY uvicorn main:app --host 127.0.0.1 --port 7700
+```
+
+See `server2-api/README.md` for systemd and nginx setup.
+
+### 3. Configure the plugin
+
+**WP Admin → WooCommerce Image Optimizer → Settings:**
+
+| Setting | Value |
+|---------|-------|
+| API URL | `http://127.0.0.1:7700` (or HTTPS proxy URL) |
+| API Key | Value of `WOO_IMG_API_KEY` |
+| WebP Quality | 82 (default) |
+| Max Dimensions | 2048 × 2048 |
+| Batch Size | 5 |
+| Auto-optimize | Enabled |
 
 ---
 
 ## WP-CLI Commands
 
 ```bash
-# Show stats
-wp bdsk-optimizer stats
+# Process the next batch of pending queue jobs
+wp woo-optimizer run
 
-# Bulk optimize all remaining images
-wp bdsk-optimizer bulk
+# Show queue health (total / done / pending / failed / saved)
+wp woo-optimizer stats
 
-# Bulk optimize with custom batch size
-wp bdsk-optimizer bulk --batch=10
+# Enqueue all unoptimized WooCommerce product images
+wp woo-optimizer queue-all
 
-# Preview what would be processed (no changes)
-wp bdsk-optimizer bulk --dry-run
+# Preview what would be enqueued (no DB writes)
+wp woo-optimizer queue-all --dry-run
 
-# Optimize a single image by attachment ID
-wp bdsk-optimizer single 1234
-
-# Restore a single image from backup
-wp bdsk-optimizer restore 1234
-
-# Run stress test and measure throughput
-wp bdsk-optimizer stress-test --images=100 --batch=5
+# Restore a single attachment from Server 2 backup
+wp woo-optimizer restore <attachment_id>
 ```
 
 ---
@@ -248,67 +204,62 @@ wp bdsk-optimizer stress-test --images=100 --batch=5
 
 ```
 wordpress-image-optimizer/
-├── wordpress-image-optimizer.php   ← plugin bootstrap, constants, loader
+├── wordpress-image-optimizer.php   ← bootstrap, constants (WOO_IMG_OPT_*), singleton
+├── uninstall.php                   ← drops queue table and option on plugin delete
 ├── includes/
-│   ├── class-settings.php          ← settings storage and validation
-│   ├── class-engine.php            ← core compression engine (Imagick + GD)
-│   ├── class-admin.php             ← admin UI, settings page, media column
-│   ├── class-bulk.php              ← AJAX bulk processor + auto-upload hook
-│   ├── class-webp.php              ← WebP URL rewriting filters
+│   ├── class-settings.php          ← woo_optimizer_settings option storage
+│   ├── class-queue.php             ← MySQL queue CRUD (enqueue, dequeue, mark done/failed)
+│   ├── class-api-client.php        ← HTTP client for all 4 Server 2 endpoints
+│   ├── class-woocommerce.php       ← product image detection + skip rules + auto-queue hook
+│   ├── class-db-updater.php        ← all WP DB writes after optimization
+│   ├── class-processor.php         ← job orchestration: backup → optimize → write → update
+│   ├── class-cron.php              ← 60s WP-Cron schedule + transient lock
+│   ├── class-restore.php           ← restore flow: download → write back → reset meta
+│   ├── class-admin.php             ← settings page, queue dashboard, AJAX handlers
 │   └── class-cli.php               ← WP-CLI command definitions
-└── assets/
-    ├── css/admin.css               ← admin page styles
-    └── js/admin.js                 ← bulk optimizer UI (progress bar, log)
+├── assets/
+│   ├── css/admin.css               ← admin styles (.wio-* classes)
+│   └── js/admin.js                 ← bulk optimizer UI (queue-all → batch loop)
+└── server2-api/
+    ├── main.py                     ← FastAPI app: /optimize, /backup, GET/DELETE /backup/{key}
+    ├── optimizer.py                ← Pillow WebP conversion (RGB/RGBA, downscale-only)
+    ├── backup.py                   ← UUID-keyed file storage with path-traversal protection
+    ├── requirements.txt
+    └── README.md                   ← Server 2 deployment guide (systemd, nginx, retention)
 ```
 
 ---
 
-## Settings Reference
+## Postmeta Written Per Attachment
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Compression Mode | Lossy | Lossy / Lossless / Ultra-Lossy |
-| JPEG Quality | 82 | 1–100. Below 70 shows visible degradation |
-| WebP Quality | 80 | 1–100. Separate from JPEG quality |
-| PNG Compression | 6 | 0–9 (lossless algorithm, higher = smaller file, slower) |
-| Max Width / Height | 2048px | Images larger than this are resized before compression. Set 0 to disable |
-| Batch Size | 5 | Images per AJAX request during bulk. Lower if you hit PHP timeouts |
-| Generate WebP | On | Create `.webp` alongside every JPEG/PNG |
-| Serve WebP | On | Swap image URLs to `.webp` for supporting browsers |
-| Auto-optimize on upload | On | Compress automatically when new images are uploaded |
-| Optimize thumbnails | On | Also compress all WordPress thumbnail sizes |
-| Backup originals | On | Save original file before compressing (enables restore) |
-| Strip metadata | On | Remove EXIF/IPTC data (GPS, camera info, copyright) |
-| Excluded paths | — | Path fragments to skip (one per line) |
+| Key | Value |
+|-----|-------|
+| `_woo_optimizer_status` | `done` |
+| `_woo_optimizer_backup_key` | UUID from Server 2 `/backup` |
+| `_woo_optimizer_original_file` | Original relative path (e.g. `2026/06/photo.jpg`) |
+| `_woo_optimizer_original_mime` | Original MIME type (e.g. `image/jpeg`) |
+| `_woo_optimizer_original_size` | Original file size in bytes |
+| `_woo_optimizer_optimized_size` | WebP file size in bytes |
+| `_woo_optimizer_saved_bytes` | Bytes saved |
 
 ---
 
-## Performance Benchmarks
+## Queue Table Schema
 
-Tested on Ubuntu 24.04, PHP 8.3, Imagick 6.9.12, batch size 5:
-
-| Metric | Result |
-|--------|--------|
-| Throughput | ~2.9 images/sec |
-| Average batch time | ~1,700ms per 5 images |
-| Peak memory | 214 MB (stable, no growth) |
-| Errors on 50-image test | 0 |
-| WebP vs original JPEG | 50–70% smaller |
-| JPEG savings (lossy 82) | 10–30% |
-
----
-
-## Backup & Restore
-
-Originals are saved to:
+```sql
+CREATE TABLE {prefix}woo_optimizer_queue (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    attachment_id BIGINT UNSIGNED NOT NULL,
+    product_id    BIGINT UNSIGNED NOT NULL,
+    status        ENUM('pending','processing','done','failed') DEFAULT 'pending',
+    attempts      TINYINT UNSIGNED DEFAULT 0,
+    error_msg     TEXT NULL,
+    created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_attachment (attachment_id)
+);
 ```
-wp-content/uploads/bdsk-optimizer-backups/{attachment_id}_{filename}
-```
-
-This directory is protected from direct web access via `.htaccess`.
-
-To restore an image from the Media Library: click **Restore** on the image detail page.
-To restore via CLI: `wp bdsk-optimizer restore {id}`
 
 ---
 
