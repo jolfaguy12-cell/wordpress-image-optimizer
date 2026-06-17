@@ -128,17 +128,29 @@
 
     function updateStats(stats) {
         if ( ! stats ) return;
+        var done    = stats.done    || 0;
+        var pending = stats.pending || 0;
+        var failed  = stats.failed  || 0;
+
         $('#wio-stat-total').text(stats.total || 0);
-        $('#wio-stat-done').text(stats.done || 0);
-        $('#wio-stat-pending').text(stats.pending || 0);
-        $('#wio-stat-failed').text(stats.failed || 0);
+        $('#wio-stat-done').text(done);
+        $('#wio-stat-pending').text(pending);
+        $('#wio-stat-failed').text(failed);
         $('#wio-stat-saved').text(formatBytes(stats.saved_bytes || 0));
 
-        var total   = (stats.done || 0) + (stats.pending || 0) + (stats.failed || 0);
-        var done    = stats.done || 0;
-        var pct     = total > 0 ? Math.round(done / total * 100) : 0;
+        // Retry Failed button: show/hide and update count
+        if ( failed > 0 ) {
+            $('#wio-retry-count').text(failed);
+            $('#wio-retry-failed').show();
+        } else {
+            $('#wio-retry-failed').hide();
+        }
+
+        // Progress bar
+        var eligible = done + pending + failed;
+        var pct      = eligible > 0 ? Math.round(done / eligible * 100) : 0;
         $fill.css('width', pct + '%');
-        $progressT.text(done + ' / ' + total + ' (' + pct + '%)');
+        $progressT.text(done + ' of ' + eligible + ' optimized (' + pct + '%)');
     }
 
     $start.on('click', startBulk);

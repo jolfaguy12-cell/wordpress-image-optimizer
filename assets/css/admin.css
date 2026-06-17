@@ -1,115 +1,254 @@
-.wio-wrap { max-width: 900px; }
+/* ===================================================================
+   WooCommerce Image Optimizer — Admin Styles
+   Uses WordPress admin CSS variables for theme-aware colors
+   =================================================================== */
 
-/* Stats bar */
-.wio-stats-bar {
+.wio-wrap { max-width: 960px; }
+
+/* ------------------------------------------------------------------
+   Stat Cards Row
+   ------------------------------------------------------------------ */
+.wio-stats-row {
     display: flex;
-    gap: 0;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    overflow: hidden;
-    margin: 20px 0;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    gap: 12px;
+    margin: 20px 0 12px;
 }
-.wio-stat {
+
+.wio-stat-card {
     flex: 1;
-    padding: 18px 20px;
+    background: #fff;
+    border: 1px solid #e2e4e7;
+    border-radius: 8px;
+    padding: 18px 16px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
     text-align: center;
-    border-right: 1px solid #eee;
+    min-width: 0;
 }
-.wio-stat:last-child { border-right: none; }
-.wio-stat-number {
-    display: block;
-    font-size: 2rem;
-    font-weight: 700;
-    color: #1d2327;
-    line-height: 1;
+
+.wio-stat-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
     margin-bottom: 4px;
 }
-.wio-stat-label {
-    display: block;
-    font-size: .75rem;
-    color: #777;
-    text-transform: uppercase;
-    letter-spacing: .04em;
-}
-.wio-done    { color: #00a32a; }
-.wio-pending { color: #f0b849; }
-.wio-failed  { color: #d63638; }
-.wio-saved   { color: #0073aa; }
 
-/* Progress */
-.wio-progress-wrap { margin: 16px 0; }
+.wio-stat-card--total   .wio-stat-icon { background: #f0f0f1; color: #50575e; }
+.wio-stat-card--done    .wio-stat-icon { background: #d7f0dc; color: #00a32a; }
+.wio-stat-card--pending .wio-stat-icon { background: #fef3cd; color: #856404; }
+.wio-stat-card--failed  .wio-stat-icon { background: #fde8e8; color: #c92a2a; }
+
+.wio-stat-number {
+    font-size: 2rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #1d2327;
+}
+
+.wio-stat-card--done    .wio-stat-number { color: #00a32a; }
+.wio-stat-card--pending .wio-stat-number { color: #856404; }
+.wio-stat-card--failed  .wio-stat-number { color: #c92a2a; }
+
+.wio-stat-label {
+    font-size: .7rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------
+   Savings Box
+   ------------------------------------------------------------------ */
+.wio-savings-box {
+    background: #eef7ff;
+    border: 1px solid #c5dff7;
+    border-left: 4px solid var(--wp-admin-theme-color, #0073aa);
+    border-radius: 6px;
+    padding: 11px 16px;
+    margin: 0 0 16px;
+    font-size: .9rem;
+    color: #1d2327;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wio-savings-box strong {
+    font-size: 1.05rem;
+    color: var(--wp-admin-theme-color, #0073aa);
+}
+
+.wio-savings-icon {
+    color: var(--wp-admin-theme-color, #0073aa);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------------
+   Progress Bar
+   ------------------------------------------------------------------ */
+.wio-progress-wrap { margin: 0 0 20px; }
+
 .wio-progress-track {
     background: #f0f0f1;
     border-radius: 6px;
-    height: 14px;
+    height: 10px;
     overflow: hidden;
 }
+
 .wio-progress-fill {
     background: linear-gradient(90deg, #00a32a, #46b450);
     height: 100%;
     width: 0%;
-    transition: width .3s ease;
+    transition: width .4s ease;
     border-radius: 6px;
 }
+
 .wio-progress-text {
-    margin-top: 6px;
-    font-size: .8rem;
-    color: #555;
+    margin-top: 5px;
+    font-size: .78rem;
+    color: #666;
 }
 
-/* Bulk buttons */
+/* ------------------------------------------------------------------
+   Bulk Action Buttons
+   ------------------------------------------------------------------ */
 .wio-bulk-wrap {
-    margin: 10px 0 20px;
+    margin: 0 0 20px;
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
-/* Log */
+.wio-btn-retry { color: #c92a2a !important; border-color: #c92a2a !important; }
+.wio-btn-retry:hover { background: #fde8e8 !important; color: #a81c1c !important; }
+
+/* ------------------------------------------------------------------
+   Processing Log
+   ------------------------------------------------------------------ */
 .wio-log {
     background: #1e1e1e;
     border-radius: 6px;
-    padding: 16px;
-    margin: 20px 0;
-    max-height: 280px;
+    padding: 14px 16px;
+    margin: 0 0 20px;
+    max-height: 260px;
     overflow-y: auto;
 }
-.wio-log h3 { color: #ccc; margin: 0 0 10px; font-size: .85rem; }
+
+.wio-log h3 { color: #ccc; margin: 0 0 8px; font-size: .82rem; }
+
 #wio-log-list {
     list-style: none;
     margin: 0;
     padding: 0;
     font-family: monospace;
-    font-size: .78rem;
+    font-size: .76rem;
 }
+
 #wio-log-list li {
     padding: 2px 0;
     color: #98c379;
     border-bottom: 1px solid #2a2a2a;
 }
+
 #wio-log-list li.wio-log-error { color: #e06c75; }
 #wio-log-list li.wio-log-info  { color: #61afef; }
 
-/* Settings table */
-.wio-settings-table th {
-    width: 220px;
-    vertical-align: top;
-    padding-top: 14px;
+/* ------------------------------------------------------------------
+   Settings — Card Grid
+   ------------------------------------------------------------------ */
+.wio-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin: 20px 0 0;
 }
-.wio-settings-table td label { display: block; margin-bottom: 5px; }
-.wio-hint { font-weight: 400; color: #888; font-size: .85em; }
 
-/* Media library column */
+.wio-settings-span2 { grid-column: 1 / -1; }
+
+.wio-settings-card {
+    background: #fff;
+    border: 1px solid #e2e4e7;
+    border-radius: 8px;
+    padding: 20px 22px;
+}
+
+.wio-settings-card-title {
+    margin: 0 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f0f0f1;
+    font-size: .74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #999;
+}
+
+.wio-field { margin-bottom: 16px; }
+.wio-field:last-child { margin-bottom: 0; }
+
+.wio-field > label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: #1d2327;
+}
+
+.wio-field input[type=url],
+.wio-field input[type=password] {
+    width: 100%;
+    max-width: 400px;
+    box-sizing: border-box;
+}
+
+.wio-field .description {
+    margin: 5px 0 0;
+    font-size: .77rem;
+    color: #999;
+    font-style: italic;
+}
+
+.wio-hint { font-weight: 400; color: #bbb; font-size: .85em; }
+
+.wio-inline-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------
+   Media Library Column
+   ------------------------------------------------------------------ */
 .wio-col-done   { color: #00a32a; font-size: .8rem; }
-.wio-col-failed { color: #d63638; font-size: .8rem; }
-.wio-col-queued { color: #f0b849; font-size: .8rem; }
+.wio-col-failed { color: #c92a2a; font-size: .8rem; }
+.wio-col-queued { color: #856404; font-size: .8rem; }
 .wio-col-na     { color: #bbb; }
+
 .wio-restore-btn {
     font-size: .75rem !important;
     padding: 0 6px !important;
     height: 22px !important;
     line-height: 20px !important;
     margin-left: 4px !important;
+}
+
+/* ------------------------------------------------------------------
+   Responsive
+   ------------------------------------------------------------------ */
+@media (max-width: 782px) {
+    .wio-stats-row       { flex-direction: column; }
+    .wio-settings-grid   { grid-template-columns: 1fr; }
+    .wio-settings-span2  { grid-column: auto; }
 }

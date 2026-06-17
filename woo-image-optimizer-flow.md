@@ -1,6 +1,6 @@
 # WooCommerce Image Optimizer — System Flow Document
 
-**Version:** 2.2.0  
+**Version:** 2.3.0  
 **Last updated:** 2026-06-17
 
 ---
@@ -17,6 +17,8 @@ A two-component system:
 **Production API URL:** `https://imgoptimizer.behdashtik.ir`
 
 All image compression happens on Server 2. WordPress only enqueues jobs, sends files over HTTPS, writes the returned WebP to disk, and updates metadata. Zero processing overhead on page loads.
+
+**Self-contained design:** All config lives inside the project folder. The FastAPI service loads `server2-api/.env` via python-dotenv. Backups default to `server2-api/backups/`. No files are written to `/etc/`, `/var/`, or any path outside the project.
 
 ---
 
@@ -40,6 +42,8 @@ An attachment is skipped (never queued) if **any** of the following is true:
 1. `mime_type = 'image/avif'` OR file extension is `.avif`
 2. `_woo_optimizer_status = 'done'` already stored on the attachment
 3. Not referenced by any WooCommerce product or variation
+
+No WebP serving layer is applied — all modern browsers support WebP natively and no `.htaccess` rewrite rules are needed.
 
 ---
 
@@ -68,6 +72,8 @@ pending → processing → failed  (after 3 attempts)
 failed  → pending              (via Retry Failed UI button or CLI)
 processing → pending           (stale reset: stuck > 5 min with attempts < 3)
 ```
+
+`is_queued()` checks all four statuses (`pending`, `processing`, `done`, `failed`) to prevent duplicate rows on re-queue attempts.
 
 ---
 
@@ -112,6 +118,7 @@ class-processor.php::process_job($job)
    └─ receives: { webp_file (base64), original_size, optimized_size, saved_bytes, width, height }
 
 4. base64_decode(webp_file) → write .webp file next to original
+   └─ unset($webp_binary) immediately to free decoded buffer before thumbnail regeneration
 
 5. Store in postmeta: _woo_optimizer_original_file, _woo_optimizer_original_mime
 
@@ -153,7 +160,7 @@ $data = $wp_filesystem->get_contents( $file_path );
 
 Failed jobs (status = `failed`) can be reset to `pending` with `attempts = 0` via:
 
-- **Admin UI:** "Retry Failed (N)" button appears on the dashboard whenever failed > 0
+- **Admin UI:** "Retry Failed (N)" button appears whenever failed > 0; hidden otherwise; JS updates count live after each AJAX response
 - **WP-CLI:** `wp woo-optimizer retry-failed`
 
 Both report how many jobs were reset.
@@ -171,6 +178,7 @@ class-restore.php::restore($attachment_id)
 2. GET /backup/{backup_key}  → binary original file data
 
 3. Write original file back to filesystem at its original path
+   └─ unset($binary) immediately after write to free buffer before thumbnail regeneration
 
 4. Collect current WebP thumbnail filenames from current attachment metadata
 
@@ -253,10 +261,12 @@ Access to the Server 2 API is secured by Bearer token authentication only:
 
 - Every request must include `Authorization: Bearer {WOO_IMG_API_KEY}`
 - Requests with a missing or incorrect token receive `HTTP 401`
-- The API key is set via the `WOO_IMG_API_KEY` environment variable on Server 2
+- The API key is set in `server2-api/.env` (loaded at startup via python-dotenv)
 - TLS is provided by Let's Encrypt via nginx; all traffic is encrypted in transit
 
-No IP-based restriction is applied — Bearer token is the sole authentication layer.
+No IP-based restriction is applied. Bearer token is the sole authentication layer.
+
+No WebP serving layer — no `.htaccess` rewrite rules, no CDN configuration. All modern browsers support WebP natively.
 
 ---
 
@@ -272,13 +282,38 @@ Auto-renewal is handled by certbot's systemd timer. Nginx listens on 443 with th
 
 ---
 
-## 14. Admin UI
+## 14. Self-contained design
+
+All configuration and data lives inside the project folder:
+
+| Location | Contents |
+|----------|---------|
+| `server2-api/.env` | API key, optional backup dir override, dev host/port |
+| `server2-api/backups/` | Stored original files (default; override via `WOO_IMG_BACKUP_DIR`) |
+| WordPress `wp_options` | `woo_optimizer_settings` (api_url, api_key, quality, batch size, etc.) |
+| WordPress `{prefix}woo_optimizer_queue` | Job queue table |
+
+Nothing is written to `/etc/`, `/var/`, or any path outside the project.
+
+The FastAPI service loads `server2-api/.env` via `python-dotenv` on startup. The systemd unit needs no `EnvironmentFile` directive.
+
+---
+
+## 15. Admin UI
 
 **Location:** WP Admin → Media → WooCommerce Image Optimizer
 
-### Dashboard stats bar
+### Stat cards (top row)
 
-Shows: Total Queued | Done | Pending | Failed | Bytes Saved
+Four cards: Total Queued | Optimized | Pending | Failed — each with an icon and color-coded number (green for done, amber for pending, red for failed).
+
+### Savings box
+
+Highlighted box below the cards showing total space saved across all optimized images.
+
+### Progress bar
+
+Shows `N of M optimized (X%)` where M = done + pending + failed.
 
 ### Bulk action buttons
 
@@ -286,19 +321,19 @@ Shows: Total Queued | Done | Pending | Failed | Bytes Saved
 |--------|-----------|--------|
 | Optimize All Product Images | API configured | Enqueues all unoptimized product images, then processes via batch loop |
 | Pause / Resume | Running | Pauses/resumes the batch loop |
-| Retry Failed (N) | failed > 0 | Resets all failed jobs to pending with attempts = 0 |
+| Retry Failed (N) | failed > 0 | Resets all failed jobs to pending with attempts = 0; hidden when failed = 0 |
 
-### Settings fields
+### Settings (card grid, two columns on wide screens)
 
-| Field | Key | Notes |
-|-------|-----|-------|
-| Server 2 API URL | `api_url` | `https://imgoptimizer.behdashtik.ir` |
-| API Key | `api_key` | `WOO_IMG_API_KEY` value from Server 2 env |
-| WebP Quality | `webp_quality` | 1–100, default 82 |
-| Max Dimensions | `max_width`, `max_height` | Default 2048×2048 |
-| Batch Size | `batch_size` | Jobs per cron run, default 5 |
-| Auto-optimize | `auto_optimize` | Queue on product image assignment |
-| Backup Retention | `backup_retention_enabled`, `backup_retention_days` | Triggers DELETE on Server 2 after N days |
+Three card sections:
+
+| Section | Fields |
+|---------|--------|
+| Connection | API URL, API Key |
+| Optimization | WebP Quality, Max Dimensions, Batch Size, Auto-optimize |
+| Backup | Backup Retention (enabled flag + days) |
+
+Responsive: single column on mobile (≤ 782px).
 
 ### Media library column
 
@@ -310,7 +345,7 @@ Per-attachment status:
 
 ---
 
-## 15. WP-CLI commands
+## 16. WP-CLI commands
 
 ```bash
 wp woo-optimizer run              # process one batch of pending jobs
@@ -323,7 +358,7 @@ wp woo-optimizer retry-failed     # reset all failed jobs to pending (attempts =
 
 ---
 
-## 16. Postmeta written per attachment
+## 17. Postmeta written per attachment
 
 | Key | Value |
 |-----|-------|
@@ -338,7 +373,7 @@ wp woo-optimizer retry-failed     # reset all failed jobs to pending (attempts =
 
 ---
 
-## 17. File structure
+## 18. File structure
 
 ```
 wordpress-image-optimizer/
@@ -357,12 +392,14 @@ wordpress-image-optimizer/
 │   ├── class-admin.php                ← settings page + AJAX + media column
 │   └── class-cli.php                  ← WP-CLI commands
 ├── assets/
-│   ├── css/admin.css                  ← .wio-* styles
-│   └── js/admin.js                    ← bulk UI + retry-failed handler
+│   ├── css/admin.css                  ← .wio-* styles (stat cards, savings box, settings grid)
+│   └── js/admin.js                    ← bulk UI + retry-failed handler + live stats
 └── server2-api/
-    ├── main.py                        ← FastAPI app: all 4 endpoints + IP middleware
+    ├── .env                           ← WOO_IMG_API_KEY + optional overrides (not committed)
+    ├── backups/                       ← original file storage (default; not committed)
+    ├── main.py                        ← FastAPI app: 4 endpoints, loads .env via python-dotenv
     ├── optimizer.py                   ← Pillow WebP conversion
     ├── backup.py                      ← UUID-keyed storage + purge_older_than()
-    ├── requirements.txt
+    ├── requirements.txt               ← fastapi, uvicorn, Pillow, python-multipart, python-dotenv
     └── README.md                      ← Server 2 deployment: SSL, nginx, systemd
 ```

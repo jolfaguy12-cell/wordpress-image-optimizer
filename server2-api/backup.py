@@ -10,7 +10,7 @@ import re
 import uuid
 from pathlib import Path
 
-_BACKUP_DIR = Path(os.environ.get("WOO_IMG_BACKUP_DIR", "./backups")).resolve()
+_BACKUP_DIR = Path(os.environ.get("WOO_IMG_BACKUP_DIR", str(Path(__file__).parent / "backups"))).resolve()
 _KEY_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )

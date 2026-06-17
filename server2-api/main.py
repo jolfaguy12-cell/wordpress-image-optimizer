@@ -4,16 +4,18 @@ Woo Image Optimizer — Server 2 API
 FastAPI service that converts WooCommerce product images to WebP and
 stores original-file backups so they can be restored later.
 
-Required env var:
-    WOO_IMG_API_KEY   — Bearer token the WordPress plugin sends
-
-Optional env vars:
-    WOO_IMG_BACKUP_DIR   — absolute path for backup storage (default: ./backups)
-    WOO_IMG_HOST         — bind host (default: 0.0.0.0 for two-server setup;
-                           set to 127.0.0.1 when running behind a local nginx)
-    WOO_IMG_PORT         — bind port (default: 7700)
+Config is loaded from server2-api/.env (via python-dotenv):
+    WOO_IMG_API_KEY      — Bearer token the WordPress plugin sends (required)
+    WOO_IMG_BACKUP_DIR   — backup storage path (default: server2-api/backups/)
+    WOO_IMG_HOST         — bind host for `python main.py` dev mode (default: 127.0.0.1)
+    WOO_IMG_PORT         — bind port for `python main.py` dev mode (default: 7700)
 """
 from __future__ import annotations
+
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent / ".env", override=False)
 
 import base64
 import os

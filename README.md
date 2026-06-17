@@ -2,7 +2,7 @@
 
 WordPress plugin that converts WooCommerce product images to WebP using a remote processing server. Queue-based and async — zero processing overhead on page loads. No server-side PHP extensions required.
 
-**Version:** 2.2.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+  
+**Version:** 2.3.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+  
 **Production API:** `https://imgoptimizer.behdashtik.ir`
 
 ---
@@ -39,22 +39,20 @@ WordPress plugin that converts WooCommerce product images to WebP using a remote
 │   Retry: attempts < 3 → back to pending | attempts = 3 → failed        │
 └─────────────────────────────────────────────────────────────────────────┘
               │ HTTPS + Bearer token
-              │ Nginx IP allowlist (Server 1 only)
               ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │           SERVER 2 API  (server2-api/)                                  │
 │           https://imgoptimizer.behdashtik.ir                            │
 │                                                                         │
-│   Two-layer access control:                                             │
-│   • Nginx: allow <Server 1 IP>; deny all;                               │
-│   • FastAPI IPAllowlistMiddleware: checks WOO_IMG_ALLOWED_IP            │
+│   Auth: Authorization: Bearer {WOO_IMG_API_KEY}  (sole layer)          │
+│   Config: server2-api/.env  (loaded via python-dotenv)                 │
+│   Backups: server2-api/backups/  (default; stays inside project)       │
 │                                                                         │
 │   POST /backup          Store original file → return backup_key (UUID)  │
 │   POST /optimize        Pillow WebP convert → return base64             │
 │   GET  /backup/{key}    Download original binary (for restore)          │
 │   DELETE /backup/{key}  Remove stored backup                            │
 │                                                                         │
-│   Auth: Authorization: Bearer {WOO_IMG_API_KEY}                        │
 │   SSL:  Let's Encrypt via certbot                                       │
 └─────────────────────────────────────────────────────────────────────────┘
               │
@@ -98,7 +96,8 @@ WordPress plugin that converts WooCommerce product images to WebP using a remote
 | **Media library column** | Shows savings (KB), status badge, Restore button per image |
 | **WP-CLI** | Full CLI for manual processing and scripting |
 | **AVIF safe** | AVIF images are always skipped |
-| **SSL** | Let's Encrypt certificate on `imgoptimizer.behdashtik.ir` |
+| **Self-contained** | All config in `server2-api/.env`; backups in `server2-api/backups/` |
+| **No WebP serving layer** | No `.htaccess` rules — all modern browsers support WebP natively |
 
 ---
 
@@ -127,9 +126,9 @@ The plugin creates `{prefix}woo_optimizer_queue` table and registers the WP-Cron
 
 See `server2-api/README.md` for the full deployment guide including:
 - Python venv + pip install
-- Environment variables (`WOO_IMG_API_KEY`, `WOO_IMG_ALLOWED_IP`)
+- `server2-api/.env` configuration (API key, optional backup dir)
 - SSL certificate via Let's Encrypt / certbot
-- Nginx config with IP allowlist + HTTPS proxy
+- Nginx HTTPS proxy config
 - Systemd service unit
 
 ### 3. Configure the plugin
@@ -139,8 +138,7 @@ See `server2-api/README.md` for the full deployment guide including:
 | Setting | Value |
 |---------|-------|
 | API URL | `https://imgoptimizer.behdashtik.ir` |
-| API Key | `WOO_IMG_API_KEY` from Server 2 env file |
-| This Server's Outbound IP | Run `curl -s ifconfig.me` on this server |
+| API Key | `WOO_IMG_API_KEY` from `server2-api/.env` |
 | WebP Quality | 82 (default) |
 | Max Dimensions | 2048 × 2048 |
 | Batch Size | 5 |
@@ -180,7 +178,7 @@ wordpress-image-optimizer/
 ├── uninstall.php                   ← drops queue table and option on plugin delete
 ├── woo-image-optimizer-flow.md     ← full system flow reference document
 ├── includes/
-│   ├── class-settings.php          ← woo_optimizer_settings option + server1_ip field
+│   ├── class-settings.php          ← woo_optimizer_settings option
 │   ├── class-queue.php             ← MySQL queue CRUD + retry_all_failed()
 │   ├── class-api-client.php        ← HTTP client (WP_Filesystem reads, multipart)
 │   ├── class-woocommerce.php       ← product image detection + skip rules + auto-queue
@@ -191,14 +189,16 @@ wordpress-image-optimizer/
 │   ├── class-admin.php             ← settings page, queue dashboard, AJAX handlers
 │   └── class-cli.php               ← WP-CLI command definitions
 ├── assets/
-│   ├── css/admin.css               ← admin styles (.wio-* classes)
+│   ├── css/admin.css               ← admin styles (.wio-* stat cards, savings box, grid)
 │   └── js/admin.js                 ← bulk optimizer UI + retry-failed handler
 └── server2-api/
-    ├── main.py                     ← FastAPI app + IPAllowlistMiddleware
+    ├── .env                        ← WOO_IMG_API_KEY + optional overrides (not committed)
+    ├── backups/                    ← original file backups (created at runtime, not committed)
+    ├── main.py                     ← FastAPI app: 4 endpoints, loads .env via python-dotenv
     ├── optimizer.py                ← Pillow WebP conversion
     ├── backup.py                   ← UUID-keyed storage, path-traversal safe
     ├── requirements.txt
-    └── README.md                   ← SSL, nginx, systemd, IP restriction guide
+    └── README.md                   ← SSL, nginx, systemd, .env setup guide
 ```
 
 ---

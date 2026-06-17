@@ -30,26 +30,26 @@ pip install -r requirements.txt
 
 ### 2. Configure environment
 
-Create `/etc/woo-img-optimizer.env` (kept outside the repo):
+Create `server2-api/.env` inside the project folder:
 
 ```bash
 # Required — Bearer token the WordPress plugin sends
-WOO_IMG_API_KEY=<generate: python3 -c "import secrets; print(secrets.token_hex(32))">
+# Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
+WOO_IMG_API_KEY=<your-generated-key>
 
-# Storage directory for original-file backups
-WOO_IMG_BACKUP_DIR=/var/backups/woo-img-optimizer
+# Optional — backup storage path (default: server2-api/backups/)
+# WOO_IMG_BACKUP_DIR=/custom/path/to/backups
 
-# Bind to localhost — nginx handles external access
+# Optional — for development (python main.py). Not used by systemd/uvicorn.
 WOO_IMG_HOST=127.0.0.1
 WOO_IMG_PORT=7700
 ```
 
-### 3. Create backup storage directory
+The app loads this file automatically via python-dotenv at startup. No other files need to be created outside the project folder.
 
-```bash
-mkdir -p /var/backups/woo-img-optimizer
-chmod 700 /var/backups/woo-img-optimizer
-```
+### 3. Verify backups directory
+
+The default backup storage is `server2-api/backups/` — created automatically on first backup. No manual setup needed.
 
 ---
 
@@ -65,7 +65,6 @@ After=network.target
 [Service]
 User=www-data
 WorkingDirectory=/path/to/wordpress-image-optimizer/server2-api
-EnvironmentFile=/etc/woo-img-optimizer.env
 ExecStart=/path/to/wordpress-image-optimizer/server2-api/.venv/bin/uvicorn \
     main:app \
     --host 127.0.0.1 \
@@ -77,6 +76,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 ```
+
+The service reads config from `server2-api/.env` automatically via python-dotenv — no `EnvironmentFile` directive needed in the unit.
 
 ```bash
 systemctl daemon-reload
@@ -113,7 +114,7 @@ certbot renew --dry-run
 
 ## Nginx configuration
 
-Create `/etc/nginx/sites-available/woo-img-optimizer`:
+Create `/etc/nginx/sites-available/imgoptimizer.behdashtik.ir`:
 
 ```nginx
 # Redirect HTTP → HTTPS
@@ -146,7 +147,7 @@ server {
 ```
 
 ```bash
-ln -s /etc/nginx/sites-available/woo-img-optimizer /etc/nginx/sites-enabled/
+ln -s /etc/nginx/sites-available/imgoptimizer.behdashtik.ir /etc/nginx/sites-enabled/
 nginx -t
 systemctl reload nginx
 ```
@@ -160,7 +161,7 @@ In **WP Admin → WooCommerce Image Optimizer → Settings**:
 | Setting | Value |
 |---------|-------|
 | Server 2 API URL | `https://imgoptimizer.behdashtik.ir` |
-| API Key | Value of `WOO_IMG_API_KEY` from the env file |
+| API Key | Value of `WOO_IMG_API_KEY` from `server2-api/.env` |
 
 ---
 
@@ -170,8 +171,7 @@ Add to crontab on Server 2 to purge backups older than N days:
 
 ```bash
 # Daily at 03:00
-0 3 * * * WOO_IMG_BACKUP_DIR=/var/backups/woo-img-optimizer \
-    /path/to/server2-api/.venv/bin/python -c \
+0 3 * * * /path/to/server2-api/.venv/bin/python -c \
     "import backup; n = backup.purge_older_than(30); print(f'Purged {n} backups')"
 ```
 
@@ -180,8 +180,8 @@ Add to crontab on Server 2 to purge backups older than N days:
 ## Development / local testing
 
 ```bash
-WOO_IMG_API_KEY=testkey \
-WOO_IMG_HOST=127.0.0.1 \
-WOO_IMG_PORT=7700 \
-uvicorn main:app --reload
+cd server2-api/
+cp .env.example .env   # if provided, else create manually
+source .venv/bin/activate
+uvicorn main:app --reload --host 127.0.0.1 --port 7700
 ```
