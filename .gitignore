@@ -1,0 +1,7 @@
+# WordPress
+*.log
+.DS_Store
+Thumbs.db
+
+# Node (if ever used)
+node_modules/
