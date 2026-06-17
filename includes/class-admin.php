@@ -73,13 +73,15 @@ class Woo_Image_Optimizer_Admin {
 		);
 
 		wp_localize_script( 'woo-image-optimizer', 'wooImgOpt', [
-			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
-			'nonce'   => wp_create_nonce( 'woo_img_opt_nonce' ),
-			'i18n'    => [
+			'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
+			'nonce'        => wp_create_nonce( 'woo_img_opt_nonce' ),
+			'pollInterval' => 10000,
+			'i18n'         => [
 				'queuing'    => __( 'Queuing images…', 'woo-image-optimizer' ),
 				'processing' => __( 'Processing…', 'woo-image-optimizer' ),
 				'done'       => __( 'All done!', 'woo-image-optimizer' ),
 				'paused'     => __( 'Paused', 'woo-image-optimizer' ),
+				'cronNote'   => __( 'Background cron is processing — checking progress every %ds.', 'woo-image-optimizer' ),
 			],
 		] );
 	}

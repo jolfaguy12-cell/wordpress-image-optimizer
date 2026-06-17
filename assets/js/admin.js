@@ -3,41 +3,35 @@
     'use strict';
 
     var state = {
-        running:   false,
-        paused:    false,
-        processed: 0,
-        saved:     0,
-        errors:    0
+        running: false,
+        paused:  false
     };
 
     var $start     = $('#wio-start');
     var $pause     = $('#wio-pause');
     var $resume    = $('#wio-resume');
-    var $progressW = $('#wio-progress-wrap');
     var $fill      = $('#wio-progress-fill');
     var $progressT = $('#wio-progress-text');
     var $log       = $('#wio-log');
     var $logList   = $('#wio-log-list');
 
+    var pollTimer = null;
+    var POLL_MS   = wooImgOpt.pollInterval || 10000;
+
     // -----------------------------------------------------------------------
-    // Bulk optimizer
+    // Bulk optimizer — enqueue then let WP-Cron drive processing
     // -----------------------------------------------------------------------
 
     function startBulk() {
-        state.running   = true;
-        state.paused    = false;
-        state.processed = 0;
-        state.saved     = 0;
-        state.errors    = 0;
+        state.running = true;
+        state.paused  = false;
 
         $start.prop('disabled', true);
         $pause.show();
-        $progressW.show();
         $log.show();
 
         addLog(wooImgOpt.i18n.queuing, 'info');
 
-        // Step 1: enqueue all unoptimized product images
         $.post(wooImgOpt.ajaxUrl, {
             action: 'woo_optimizer_queue_all',
             nonce:  wooImgOpt.nonce
@@ -50,16 +44,16 @@
             }
             var d = res.data;
             addLog('Queued ' + d.queued + ' image(s). ' + d.skipped + ' already in queue.', 'info');
+            addLog(wooImgOpt.i18n.cronNote.replace('%ds', POLL_MS / 1000), 'info');
             updateStats(d.stats);
 
-            if ( d.stats.pending === 0 ) {
+            if ( d.stats.pending === 0 && d.stats.processing === 0 ) {
                 addLog('Nothing to process.', 'info');
                 stopBulk(true);
                 return;
             }
 
-            // Step 2: process batches
-            runBatch();
+            startPolling();
         })
         .fail(function (xhr) {
             addLog('Network error: ' + xhr.status, 'error');
@@ -67,57 +61,33 @@
         });
     }
 
-    function runBatch() {
-        if ( ! state.running || state.paused ) return;
+    function startPolling() {
+        clearInterval(pollTimer);
+        pollTimer = setInterval(fetchStats, POLL_MS);
+    }
+
+    function fetchStats() {
+        if ( state.paused ) return;
 
         $.post(wooImgOpt.ajaxUrl, {
-            action: 'woo_optimizer_batch',
+            action: 'woo_optimizer_stats',
             nonce:  wooImgOpt.nonce
         })
         .done(function (res) {
-            if ( ! res.success ) {
-                addLog('Batch error: ' + (res.data || '?'), 'error');
-                stopBulk();
-                return;
-            }
-            var d = res.data;
+            if ( ! res.success ) return;
+            var s = res.data;
+            updateStats(s);
 
-            state.processed += d.processed || 0;
-            state.saved     += d.saved_bytes || 0;
-            state.errors    += (d.errors || []).length;
-
-            if ( d.processed > 0 ) {
-                addLog('Batch done — ' + d.processed + ' optimized, saved ' + formatBytes(d.saved_bytes || 0));
-            }
-            $.each(d.errors || [], function (i, err) {
-                addLog('Error: ' + err, 'error');
-            });
-
-            updateStats(d.stats);
-
-            if ( d.done ) {
+            if ( s.pending === 0 && s.processing === 0 ) {
                 addLog(wooImgOpt.i18n.done, 'info');
-                addLog(
-                    'Total: ' + state.processed + ' optimized | ' +
-                    state.errors + ' errors | ' +
-                    formatBytes(state.saved) + ' saved',
-                    'info'
-                );
                 stopBulk(true);
-                return;
             }
-
-            // Continue
-            setTimeout(runBatch, 300);
-        })
-        .fail(function (xhr) {
-            addLog('Network error: ' + xhr.status, 'error');
-            stopBulk();
         });
     }
 
     function stopBulk(done) {
         state.running = false;
+        clearInterval(pollTimer);
         $pause.hide();
         $resume.hide();
         $start.prop('disabled', done ? true : false);
@@ -159,15 +129,16 @@
         state.paused = true;
         $pause.hide();
         $resume.show();
-        addLog(wooImgOpt.i18n.paused, 'info');
+        addLog(wooImgOpt.i18n.paused + ' (cron still runs in background)', 'info');
     });
 
     $resume.on('click', function () {
         state.paused = false;
         $resume.hide();
         $pause.show();
-        addLog('Resumed.', 'info');
-        runBatch();
+        addLog('Resumed polling.', 'info');
+        fetchStats();
+        startPolling();
     });
 
     // -----------------------------------------------------------------------
