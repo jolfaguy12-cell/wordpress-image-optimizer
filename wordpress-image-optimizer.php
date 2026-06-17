@@ -1,11 +1,12 @@
 <?php
 /**
- * Plugin Name: Behdashtik Image Optimizer
+ * Plugin Name: WordPress Image Optimizer
  * Description: Lightweight image optimization with WebP conversion, bulk processing, and smart compression. No external API required.
  * Version:     1.0.0
- * Author:      Behdashtik
+ * Author:      jolfaguy12-cell
  * License:     GPL-2.0+
- * Text Domain: bdsk-optimizer
+ * Text Domain: wp-image-optimizer
+ * Plugin URI:  https://github.com/jolfaguy12-cell/wordpress-image-optimizer
  */
 
 defined( 'ABSPATH' ) || exit;
@@ -46,7 +47,6 @@ add_action( 'plugins_loaded', 'bdsk_optimizer' );
 register_activation_hook( __FILE__, function () {
     $backup_dir = WP_CONTENT_DIR . '/uploads/bdsk-optimizer-backups';
     wp_mkdir_p( $backup_dir );
-    // Protect backup dir from direct access
     file_put_contents( $backup_dir . '/.htaccess', 'deny from all' );
     file_put_contents( $backup_dir . '/index.php', '<?php // silence' );
 } );

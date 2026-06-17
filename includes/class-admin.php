@@ -22,8 +22,8 @@ class BDSK_Optimizer_Admin {
 
     public function add_menu() {
         add_media_page(
-            'Image Optimizer',
-            'Image Optimizer',
+            'WordPress Image Optimizer',
+            'WordPress Image Optimizer',
             'upload_files',
             'bdsk-optimizer',
             [ $this, 'render_page' ]
@@ -81,7 +81,7 @@ class BDSK_Optimizer_Admin {
         $s     = $this->settings->get_all();
         ?>
         <div class="wrap bdsk-optimizer-wrap">
-            <h1>Image Optimizer</h1>
+            <h1>WordPress Image Optimizer</h1>
 
             <?php if ( isset( $_GET['saved'] ) ) : ?>
                 <div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>
