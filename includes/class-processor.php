@@ -104,6 +104,7 @@ class Woo_Image_Optimizer_Processor {
 		if ( file_put_contents( $webp_path, $webp_binary ) === false ) {
 			return $this->fail_job( $job_id, $attempts, "Failed to write WebP file: {$webp_path}" );
 		}
+		unset( $webp_binary ); // free decoded buffer before thumbnail regeneration
 
 		// --- 5. Capture original metadata BEFORE any DB changes (for thumbnail cleanup) ---
 		$original_meta = wp_get_attachment_metadata( $attachment_id );

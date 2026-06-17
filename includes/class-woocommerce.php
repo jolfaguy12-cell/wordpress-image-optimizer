@@ -68,18 +68,18 @@ class Woo_Image_Optimizer_WooCommerce {
 	// -----------------------------------------------------------------------
 
 	public function should_skip( int $attachment_id ): bool {
-		$mime = get_post_mime_type( $attachment_id );
-		if ( $mime === 'image/avif' ) {
+		if ( $this->is_avif( $attachment_id ) ) {
+			return true;
+		}
+		return get_post_meta( $attachment_id, '_woo_optimizer_status', true ) === 'done';
+	}
+
+	private function is_avif( int $attachment_id ): bool {
+		if ( get_post_mime_type( $attachment_id ) === 'image/avif' ) {
 			return true;
 		}
 		$file = get_attached_file( $attachment_id );
-		if ( $file && strtolower( pathinfo( $file, PATHINFO_EXTENSION ) ) === 'avif' ) {
-			return true;
-		}
-		if ( get_post_meta( $attachment_id, '_woo_optimizer_status', true ) === 'done' ) {
-			return true;
-		}
-		return false;
+		return $file && strtolower( pathinfo( $file, PATHINFO_EXTENSION ) ) === 'avif';
 	}
 
 	// -----------------------------------------------------------------------
@@ -146,9 +146,9 @@ class Woo_Image_Optimizer_WooCommerce {
 			array_values( $gallery_ids )
 		) ) ) );
 
-		// Filter out AVIF attachments
+		// SQL already excludes done attachments; only AVIF check remains.
 		return array_values( array_filter( $all, function ( int $id ) {
-			return ! $this->should_skip( $id );
+			return ! $this->is_avif( $id );
 		} ) );
 	}
 

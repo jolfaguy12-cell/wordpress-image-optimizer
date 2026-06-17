@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WooCommerce Image Optimizer
  * Description: Converts WooCommerce product images to WebP via a remote processing server. Async queue-based, zero page-load overhead. No local heavy processing.
- * Version:     2.0.0
+ * Version:     2.2.0
  * Author:      jolfaguy12-cell
  * License:     GPL-2.0+
  * Text Domain: woo-image-optimizer
@@ -12,7 +12,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
-define( 'WOO_IMG_OPT_VERSION', '2.0.0' );
+define( 'WOO_IMG_OPT_VERSION', '2.2.0' );
 define( 'WOO_IMG_OPT_FILE',    __FILE__ );
 define( 'WOO_IMG_OPT_DIR',     plugin_dir_path( __FILE__ ) );
 define( 'WOO_IMG_OPT_URL',     plugin_dir_url( __FILE__ ) );

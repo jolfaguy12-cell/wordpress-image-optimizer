@@ -2,7 +2,7 @@
 
 WordPress plugin that converts WooCommerce product images to WebP using a remote processing server. Queue-based and async — zero processing overhead on page loads. No server-side PHP extensions required.
 
-**Version:** 2.1.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+  
+**Version:** 2.2.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+  
 **Production API:** `https://imgoptimizer.behdashtik.ir`
 
 ---
@@ -77,10 +77,8 @@ WordPress plugin that converts WooCommerce product images to WebP using a remote
 
 | Layer | Where | Mechanism |
 |-------|-------|-----------|
-| IP allowlist | Nginx | `allow <Server 1 IP>; deny all;` — blocks all other IPs at network level |
-| IP allowlist | FastAPI | `IPAllowlistMiddleware` checks `WOO_IMG_ALLOWED_IP` env var before auth |
-| Auth | FastAPI | `Authorization: Bearer {WOO_IMG_API_KEY}` on every request |
-| Transport | Nginx | TLS 1.2/1.3 via Let's Encrypt certificate |
+| Auth | FastAPI | `Authorization: Bearer {WOO_IMG_API_KEY}` required on every request |
+| Transport | Nginx | TLS 1.2/1.3 via Let's Encrypt certificate for `imgoptimizer.behdashtik.ir` |
 
 ---
 

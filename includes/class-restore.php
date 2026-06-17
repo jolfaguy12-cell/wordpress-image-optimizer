@@ -50,6 +50,7 @@ class Woo_Image_Optimizer_Restore {
 		if ( file_put_contents( $original_full_path, $binary ) === false ) {
 			return new WP_Error( 'write_failed', "Could not write original file: {$original_full_path}" );
 		}
+		unset( $binary ); // free download buffer before thumbnail regeneration
 
 		// 4. Collect current WebP thumbnail filenames BEFORE resetting metadata
 		$current_meta   = wp_get_attachment_metadata( $attachment_id );

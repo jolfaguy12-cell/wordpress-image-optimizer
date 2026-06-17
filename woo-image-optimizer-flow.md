@@ -1,6 +1,6 @@
 # WooCommerce Image Optimizer — System Flow Document
 
-**Version:** 2.1.0  
+**Version:** 2.2.0  
 **Last updated:** 2026-06-17
 
 ---
@@ -247,29 +247,16 @@ Returns original image binary (`application/octet-stream`).
 
 ---
 
-## 12. Security — access restriction
+## 12. Security
 
-Access to the Server 2 API is restricted to Server 1 (WordPress host) only via two independent layers:
+Access to the Server 2 API is secured by Bearer token authentication only:
 
-### Layer 1 — Nginx (network level)
+- Every request must include `Authorization: Bearer {WOO_IMG_API_KEY}`
+- Requests with a missing or incorrect token receive `HTTP 401`
+- The API key is set via the `WOO_IMG_API_KEY` environment variable on Server 2
+- TLS is provided by Let's Encrypt via nginx; all traffic is encrypted in transit
 
-```nginx
-allow YOUR_SERVER1_IP;
-deny  all;
-```
-
-Requests from any IP other than the WordPress server are rejected with `403` at the Nginx level, before reaching the application.
-
-### Layer 2 — FastAPI middleware (application level)
-
-`IPAllowlistMiddleware` in `main.py` reads `WOO_IMG_ALLOWED_IP` from the environment. On every request it checks the source IP (honoring `X-Forwarded-For` set by the local nginx proxy). If the IP does not match, returns `403` before the Bearer token auth check.
-
-```bash
-# Required env var on Server 2
-WOO_IMG_ALLOWED_IP=<WordPress server public IP>
-```
-
-The WordPress server's outbound IP is entered in **WP Admin → WooCommerce Image Optimizer → Settings → This Server's Outbound IP**. This value is stored locally for reference only — it is not sent in API requests.
+No IP-based restriction is applied — Bearer token is the sole authentication layer.
 
 ---
 
@@ -307,7 +294,6 @@ Shows: Total Queued | Done | Pending | Failed | Bytes Saved
 |-------|-----|-------|
 | Server 2 API URL | `api_url` | `https://imgoptimizer.behdashtik.ir` |
 | API Key | `api_key` | `WOO_IMG_API_KEY` value from Server 2 env |
-| This Server's Outbound IP | `server1_ip` | Stored for reference; used to configure Server 2 |
 | WebP Quality | `webp_quality` | 1–100, default 82 |
 | Max Dimensions | `max_width`, `max_height` | Default 2048×2048 |
 | Batch Size | `batch_size` | Jobs per cron run, default 5 |

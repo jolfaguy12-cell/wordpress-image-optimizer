@@ -205,23 +205,6 @@ class Woo_Image_Optimizer_Admin {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="wio-server1-ip"><?php esc_html_e( 'This Server\'s Outbound IP', 'woo-image-optimizer' ); ?></label></th>
-						<td>
-							<input type="text" id="wio-server1-ip" name="server1_ip" value="<?php echo esc_attr( $s['server1_ip'] ); ?>" class="regular-text" placeholder="203.0.113.10">
-							<p class="description">
-								<?php esc_html_e( 'The public IP address that WordPress (this server) uses when making outbound requests. Server 2 will reject all requests from any other IP.', 'woo-image-optimizer' ); ?>
-								<br>
-								<?php
-								printf(
-									/* translators: %s: link to an IP lookup tool */
-									esc_html__( 'To find it, run %s on your server or check with your hosting provider.', 'woo-image-optimizer' ),
-									'<code>curl -s ifconfig.me</code>'
-								);
-								?>
-							</p>
-						</td>
-					</tr>
-					<tr>
 						<th scope="row"><label for="wio-webp-quality"><?php esc_html_e( 'WebP Quality', 'woo-image-optimizer' ); ?> <span class="wio-hint">(1–100)</span></label></th>
 						<td>
 							<input type="number" id="wio-webp-quality" name="webp_quality" value="<?php echo esc_attr( $s['webp_quality'] ); ?>" min="1" max="100" class="small-text">
