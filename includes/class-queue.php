@@ -111,6 +111,21 @@ class Woo_Image_Optimizer_Queue {
 	}
 
 	/**
+	 * Reset all failed jobs back to pending with attempts = 0.
+	 *
+	 * @return int Number of rows reset.
+	 */
+	public function retry_all_failed(): int {
+		global $wpdb;
+		$wpdb->query(
+			"UPDATE " . self::table_name() . "
+			 SET status = 'pending', attempts = 0, error_msg = NULL, updated_at = NOW()
+			 WHERE status = 'failed'"
+		);
+		return (int) $wpdb->rows_affected;
+	}
+
+	/**
 	 * Resets jobs stuck in 'processing' for more than 5 minutes back to 'pending'.
 	 */
 	public function reset_stale(): void {

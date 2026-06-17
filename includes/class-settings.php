@@ -22,8 +22,9 @@ class Woo_Image_Optimizer_Settings {
 	public function save( array $input ): void {
 		$clean = [];
 
-		$clean['api_url'] = esc_url_raw( trim( $input['api_url'] ?? '' ) );
-		$clean['api_key'] = sanitize_text_field( $input['api_key'] ?? '' );
+		$clean['api_url']    = esc_url_raw( trim( $input['api_url'] ?? '' ) );
+		$clean['api_key']    = sanitize_text_field( $input['api_key'] ?? '' );
+		$clean['server1_ip'] = sanitize_text_field( trim( $input['server1_ip'] ?? '' ) );
 
 		$clean['webp_quality'] = max( 1, min( 100, (int) ( $input['webp_quality'] ?? 82 ) ) );
 		$clean['max_width']    = max( 0, (int) ( $input['max_width'] ?? 2048 ) );
@@ -42,6 +43,7 @@ class Woo_Image_Optimizer_Settings {
 		return [
 			'api_url'                   => '',
 			'api_key'                   => '',
+			'server1_ip'                => '',
 			'webp_quality'              => 82,
 			'max_width'                 => 2048,
 			'max_height'                => 2048,

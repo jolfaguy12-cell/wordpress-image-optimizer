@@ -31,10 +31,11 @@ class Woo_Image_Optimizer_Admin {
 		add_action( 'manage_media_custom_column', [ $this, 'media_column_content' ], 10, 2 );
 
 		// AJAX handlers
-		add_action( 'wp_ajax_woo_optimizer_queue_all', [ $this, 'ajax_queue_all' ] );
-		add_action( 'wp_ajax_woo_optimizer_batch',     [ $this, 'ajax_batch' ] );
-		add_action( 'wp_ajax_woo_optimizer_stats',     [ $this, 'ajax_stats' ] );
-		add_action( 'wp_ajax_woo_optimizer_restore',   [ $this, 'ajax_restore' ] );
+		add_action( 'wp_ajax_woo_optimizer_queue_all',    [ $this, 'ajax_queue_all' ] );
+		add_action( 'wp_ajax_woo_optimizer_batch',        [ $this, 'ajax_batch' ] );
+		add_action( 'wp_ajax_woo_optimizer_stats',        [ $this, 'ajax_stats' ] );
+		add_action( 'wp_ajax_woo_optimizer_restore',      [ $this, 'ajax_restore' ] );
+		add_action( 'wp_ajax_woo_optimizer_retry_failed', [ $this, 'ajax_retry_failed' ] );
 	}
 
 	// -----------------------------------------------------------------------
@@ -161,6 +162,14 @@ class Woo_Image_Optimizer_Admin {
 					</button>
 					<button class="button button-large" id="wio-pause" style="display:none"><?php esc_html_e( 'Pause', 'woo-image-optimizer' ); ?></button>
 					<button class="button button-large" id="wio-resume" style="display:none"><?php esc_html_e( 'Resume', 'woo-image-optimizer' ); ?></button>
+					<?php if ( $stats['failed'] > 0 ) : ?>
+						<button class="button button-large wio-retry-failed" id="wio-retry-failed">
+							<?php
+							/* translators: %d: number of failed jobs */
+							printf( esc_html__( 'Retry Failed (%d)', 'woo-image-optimizer' ), (int) $stats['failed'] );
+							?>
+						</button>
+					<?php endif; ?>
 				<?php else : ?>
 					<p class="description"><?php esc_html_e( 'Configure API settings below to enable optimization.', 'woo-image-optimizer' ); ?></p>
 				<?php endif; ?>
@@ -184,15 +193,32 @@ class Woo_Image_Optimizer_Admin {
 					<tr>
 						<th scope="row"><label for="wio-api-url"><?php esc_html_e( 'Server 2 API URL', 'woo-image-optimizer' ); ?></label></th>
 						<td>
-							<input type="url" id="wio-api-url" name="api_url" value="<?php echo esc_attr( $s['api_url'] ); ?>" class="regular-text" placeholder="https://your-processing-server.com">
-							<p class="description"><?php esc_html_e( 'Base URL of the remote processing server. See data-api.md on Server 2.', 'woo-image-optimizer' ); ?></p>
+							<input type="url" id="wio-api-url" name="api_url" value="<?php echo esc_attr( $s['api_url'] ); ?>" class="regular-text" placeholder="https://imgoptimizer.behdashtik.ir">
+							<p class="description"><?php esc_html_e( 'Base URL of the remote image processing server.', 'woo-image-optimizer' ); ?></p>
 						</td>
 					</tr>
 					<tr>
 						<th scope="row"><label for="wio-api-key"><?php esc_html_e( 'API Key', 'woo-image-optimizer' ); ?></label></th>
 						<td>
 							<input type="password" id="wio-api-key" name="api_key" value="<?php echo esc_attr( $s['api_key'] ); ?>" class="regular-text" autocomplete="new-password">
-							<p class="description"><?php esc_html_e( 'Bearer token from Server 2. Keep this secret.', 'woo-image-optimizer' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Bearer token configured on Server 2 (WOO_IMG_API_KEY). Keep this secret.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wio-server1-ip"><?php esc_html_e( 'This Server\'s Outbound IP', 'woo-image-optimizer' ); ?></label></th>
+						<td>
+							<input type="text" id="wio-server1-ip" name="server1_ip" value="<?php echo esc_attr( $s['server1_ip'] ); ?>" class="regular-text" placeholder="203.0.113.10">
+							<p class="description">
+								<?php esc_html_e( 'The public IP address that WordPress (this server) uses when making outbound requests. Server 2 will reject all requests from any other IP.', 'woo-image-optimizer' ); ?>
+								<br>
+								<?php
+								printf(
+									/* translators: %s: link to an IP lookup tool */
+									esc_html__( 'To find it, run %s on your server or check with your hosting provider.', 'woo-image-optimizer' ),
+									'<code>curl -s ifconfig.me</code>'
+								);
+								?>
+							</p>
 						</td>
 					</tr>
 					<tr>
@@ -325,6 +351,20 @@ class Woo_Image_Optimizer_Admin {
 		}
 
 		wp_send_json_success( [ 'message' => "Attachment #{$attachment_id} restored." ] );
+	}
+
+	public function ajax_retry_failed(): void {
+		check_ajax_referer( 'woo_img_opt_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized', 403 );
+		}
+
+		$reset = $this->queue->retry_all_failed();
+
+		wp_send_json_success( [
+			'reset' => $reset,
+			'stats' => $this->queue->get_stats(),
+		] );
 	}
 
 	// -----------------------------------------------------------------------

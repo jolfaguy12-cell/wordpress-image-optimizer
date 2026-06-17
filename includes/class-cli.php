@@ -127,4 +127,21 @@ class Woo_Image_Optimizer_CLI {
 
 		WP_CLI::success( "[{$id}] Restored from Server 2 backup." );
 	}
+
+	/**
+	 * Reset all failed jobs back to pending so they will be retried.
+	 *
+	 * @subcommand retry-failed
+	 * @when after_wp_load
+	 */
+	public function retry_failed( array $args, array $assoc_args ): void {
+		$reset = woo_image_optimizer()['queue']->retry_all_failed();
+
+		if ( 0 === $reset ) {
+			WP_CLI::line( 'No failed jobs found.' );
+			return;
+		}
+
+		WP_CLI::success( "Reset {$reset} failed job(s) back to pending. Run `wp woo-optimizer run` to process." );
+	}
 }

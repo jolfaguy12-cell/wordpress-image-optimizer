@@ -4,12 +4,14 @@ Woo Image Optimizer — Server 2 API
 FastAPI service that converts WooCommerce product images to WebP and
 stores original-file backups so they can be restored later.
 
-Required env var:
-    WOO_IMG_API_KEY   — Bearer token the WordPress plugin sends
+Required env vars:
+    WOO_IMG_API_KEY      — Bearer token the WordPress plugin sends
+    WOO_IMG_ALLOWED_IP   — Server 1 (WordPress) outbound IP; all other IPs get 403
 
 Optional env vars:
     WOO_IMG_BACKUP_DIR   — absolute path for backup storage (default: ./backups)
-    WOO_IMG_HOST         — bind host (default: 127.0.0.1)
+    WOO_IMG_HOST         — bind host (default: 0.0.0.0 for two-server setup;
+                           set to 127.0.0.1 for local testing behind nginx)
     WOO_IMG_PORT         — bind port (default: 7700)
 """
 from __future__ import annotations
@@ -18,13 +20,39 @@ import base64
 import os
 from typing import Annotated, Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import JSONResponse, Response
+from starlette.middleware.base import RequestResponseEndpoint
 
 import backup as bk
 import optimizer as opt
 
 app = FastAPI(title="Woo Image Optimizer API", version="1.0.0", docs_url=None, redoc_url=None)
+
+# ---------------------------------------------------------------------------
+# IP allowlist middleware (Layer 2 — FastAPI level)
+# ---------------------------------------------------------------------------
+
+_ALLOWED_IP: str = os.environ.get("WOO_IMG_ALLOWED_IP", "")
+
+
+class IPAllowlistMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if _ALLOWED_IP:
+            # Honour X-Forwarded-For set by a trusted nginx proxy on the same host.
+            forwarded_for = request.headers.get("X-Forwarded-For", "")
+            client_ip = (forwarded_for.split(",")[0].strip() if forwarded_for
+                         else (request.client.host if request.client else ""))
+            if client_ip != _ALLOWED_IP:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Forbidden: IP not allowed."},
+                )
+        return await call_next(request)
+
+
+app.add_middleware(IPAllowlistMiddleware)
 
 # ---------------------------------------------------------------------------
 # Auth
@@ -150,7 +178,7 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "main:app",
-        host=os.environ.get("WOO_IMG_HOST", "127.0.0.1"),
+        host=os.environ.get("WOO_IMG_HOST", "0.0.0.0"),
         port=int(os.environ.get("WOO_IMG_PORT", "7700")),
         reload=False,
     )

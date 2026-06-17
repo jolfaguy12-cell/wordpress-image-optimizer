@@ -2,7 +2,8 @@
 
 WordPress plugin that converts WooCommerce product images to WebP using a remote processing server. Queue-based and async — zero processing overhead on page loads. No server-side PHP extensions required.
 
-**Version:** 2.0.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+
+**Version:** 2.1.0 | **Requires:** WordPress 6.0+, WooCommerce 8.0+, PHP 8.1+  
+**Production API:** `https://imgoptimizer.behdashtik.ir`
 
 ---
 
@@ -21,38 +22,43 @@ WordPress plugin that converts WooCommerce product images to WebP using a remote
 │          │                                                              │
 │          ▼                                                              │
 │   {prefix}woo_optimizer_queue   ← MySQL queue table                    │
-│   ┌────────────┬───────────┬──────────┬──────────┬──────────────────┐  │
-│   │ attachment │ product   │ status   │ attempts │ error_msg        │  │
-│   │ _id        │ _id       │ pending  │ 0–3      │ null             │  │
-│   └────────────┴───────────┴──────────┴──────────┴──────────────────┘  │
+│   status: pending → processing → done | failed                          │
+│   failed → pending  (Retry Failed button or wp woo-optimizer            │
+│                      retry-failed)                                      │
 │          │                                                              │
 │          ▼  (every 60 seconds, transient lock)                          │
 │   class-cron.php → class-processor.php                                 │
 │          │                                                              │
-│          │  1. POST /backup  ─────────────────────────────────────────► │
+│          │  1. POST /backup  (WP_Filesystem read — memory-safe) ──────► │
 │          │  2. POST /optimize ────────────────────────────────────────► │
 │          │  3. Decode base64 WebP → write to disk                       │
-│          │  4. Delete original .jpg/.png                                │
+│          │  4. Delete original .jpg/.png + old thumbnail size files     │
 │          │  5. class-db-updater.php → update all WP metadata            │
 │          │  6. Mark queue row: done                                     │
 │                                                                         │
 │   Retry: attempts < 3 → back to pending | attempts = 3 → failed        │
 └─────────────────────────────────────────────────────────────────────────┘
-                    │ HTTP (Bearer token)
-                    ▼
+              │ HTTPS + Bearer token
+              │ Nginx IP allowlist (Server 1 only)
+              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    SERVER 2 API  (server2-api/)                         │
+│           SERVER 2 API  (server2-api/)                                  │
+│           https://imgoptimizer.behdashtik.ir                            │
+│                                                                         │
+│   Two-layer access control:                                             │
+│   • Nginx: allow <Server 1 IP>; deny all;                               │
+│   • FastAPI IPAllowlistMiddleware: checks WOO_IMG_ALLOWED_IP            │
 │                                                                         │
 │   POST /backup          Store original file → return backup_key (UUID)  │
-│   POST /optimize        Convert to WebP (Pillow) → return base64        │
+│   POST /optimize        Pillow WebP convert → return base64             │
 │   GET  /backup/{key}    Download original binary (for restore)          │
 │   DELETE /backup/{key}  Remove stored backup                            │
 │                                                                         │
 │   Auth: Authorization: Bearer {WOO_IMG_API_KEY}                        │
-│   Storage: configurable directory, UUID-keyed, path-traversal safe      │
+│   SSL:  Let's Encrypt via certbot                                       │
 └─────────────────────────────────────────────────────────────────────────┘
-                    │
-                    ▼
+              │
+              ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         FILE SYSTEM (Server 1)                          │
 │                                                                         │
@@ -61,50 +67,20 @@ WordPress plugin that converts WooCommerce product images to WebP using a remote
 │   ├── product-300x300.webp     ← regenerated thumbnail                  │
 │   └── product-600x600.webp                                              │
 │                                                                         │
-│   Original .jpg/.png deleted after successful optimization.             │
-│   Originals backed up permanently on Server 2 (restorable any time).   │
+│   Original .jpg/.png deleted. Backed up permanently on Server 2.        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## How It Works
+## Security
 
-### On Image Upload or Product Save (automatic)
-
-1. `_thumbnail_id` or `_product_image_gallery` postmeta is updated
-2. `class-woocommerce.php` checks skip rules (AVIF, already done, non-product)
-3. Attachment is added to the MySQL queue as `pending`
-
-### Queue Processing (WP-Cron, every 60 seconds)
-
-1. Cron tick acquires a 25-second transient lock (prevents overlapping runs)
-2. Batch of `batch_size` pending jobs is picked up
-3. For each job:
-   - Original file POSTed to `/backup` → `backup_key` stored in postmeta immediately (retry-safe)
-   - Original file POSTed to `/optimize` → base64 WebP returned
-   - WebP decoded and written to disk alongside original
-   - Original `.jpg`/`.png` deleted
-   - All WordPress metadata updated: `_wp_attached_file`, `post_mime_type`, attachment sizes
-   - Old `.jpg`/`.png` thumbnail size files deleted
-   - Queue row marked `done`
-
-### Restore Flow
-
-1. Admin clicks Restore (media library column) or runs `wp woo-optimizer restore <id>`
-2. Plugin calls `GET /backup/{key}` → downloads original binary
-3. Original written back to filesystem; WebP and WebP thumbnails deleted
-4. All WordPress metadata reset to original values; `_woo_optimizer_*` postmeta cleared
-5. Queue row deleted
-
----
-
-## Skip Rules
-
-An attachment is never queued if:
-- MIME type is `image/avif` or file extension is `.avif`
-- `_woo_optimizer_status = done` already set on the attachment
-- Not referenced by any WooCommerce product (`_thumbnail_id` on product/variation, or `_product_image_gallery`)
+| Layer | Where | Mechanism |
+|-------|-------|-----------|
+| IP allowlist | Nginx | `allow <Server 1 IP>; deny all;` — blocks all other IPs at network level |
+| IP allowlist | FastAPI | `IPAllowlistMiddleware` checks `WOO_IMG_ALLOWED_IP` env var before auth |
+| Auth | FastAPI | `Authorization: Bearer {WOO_IMG_API_KEY}` on every request |
+| Transport | Nginx | TLS 1.2/1.3 via Let's Encrypt certificate |
 
 ---
 
@@ -114,14 +90,17 @@ An attachment is never queued if:
 |---------|---------|
 | **Scope** | WooCommerce product images only (featured image, gallery, variation thumbnails) |
 | **Processing** | Remote — all compression on Server 2, zero PHP load on WordPress |
+| **Memory-safe upload** | `WP_Filesystem` reads image files — no double-buffering in PHP memory |
 | **Queue** | MySQL table, no Redis required |
 | **Retry logic** | Up to 3 attempts per image before marking failed |
+| **Retry Failed** | One-click reset of all failed jobs (UI button + `wp woo-optimizer retry-failed`) |
 | **Restore** | One-click restore from Server 2 backup at any time |
 | **Auto-queue on upload** | Queues new product images as soon as they're attached |
 | **Bulk enqueue** | Admin UI or CLI enqueues all unoptimized product images at once |
 | **Media library column** | Shows savings (KB), status badge, Restore button per image |
 | **WP-CLI** | Full CLI for manual processing and scripting |
 | **AVIF safe** | AVIF images are always skipped |
+| **SSL** | Let's Encrypt certificate on `imgoptimizer.behdashtik.ir` |
 
 ---
 
@@ -130,8 +109,7 @@ An attachment is never queued if:
 - WordPress 6.0+
 - WooCommerce 8.0+
 - PHP 8.1+
-- MySQL queue table (created automatically on plugin activation)
-- Server 2 API running and reachable (see `server2-api/`)
+- Server 2 API running at `https://imgoptimizer.behdashtik.ir`
 
 ---
 
@@ -145,24 +123,16 @@ cp -r wordpress-image-optimizer /var/www/yoursite/wp-content/plugins/
 
 Activate via **WP Admin → Plugins → WooCommerce Image Optimizer**.
 
-On activation the plugin creates the `{prefix}woo_optimizer_queue` table and registers the WP-Cron schedule.
+The plugin creates `{prefix}woo_optimizer_queue` table and registers the WP-Cron schedule on activation.
 
 ### 2. Set up the Server 2 API
 
-```bash
-cd server2-api/
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Generate an API key
-python3 -c "import secrets; print(secrets.token_hex(32))"
-
-# Start (replace YOUR_KEY)
-WOO_IMG_API_KEY=YOUR_KEY uvicorn main:app --host 127.0.0.1 --port 7700
-```
-
-See `server2-api/README.md` for systemd and nginx setup.
+See `server2-api/README.md` for the full deployment guide including:
+- Python venv + pip install
+- Environment variables (`WOO_IMG_API_KEY`, `WOO_IMG_ALLOWED_IP`)
+- SSL certificate via Let's Encrypt / certbot
+- Nginx config with IP allowlist + HTTPS proxy
+- Systemd service unit
 
 ### 3. Configure the plugin
 
@@ -170,8 +140,9 @@ See `server2-api/README.md` for systemd and nginx setup.
 
 | Setting | Value |
 |---------|-------|
-| API URL | `http://127.0.0.1:7700` (or HTTPS proxy URL) |
-| API Key | Value of `WOO_IMG_API_KEY` |
+| API URL | `https://imgoptimizer.behdashtik.ir` |
+| API Key | `WOO_IMG_API_KEY` from Server 2 env file |
+| This Server's Outbound IP | Run `curl -s ifconfig.me` on this server |
 | WebP Quality | 82 (default) |
 | Max Dimensions | 2048 × 2048 |
 | Batch Size | 5 |
@@ -196,6 +167,9 @@ wp woo-optimizer queue-all --dry-run
 
 # Restore a single attachment from Server 2 backup
 wp woo-optimizer restore <attachment_id>
+
+# Reset all failed jobs back to pending (attempts = 0)
+wp woo-optimizer retry-failed
 ```
 
 ---
@@ -206,11 +180,12 @@ wp woo-optimizer restore <attachment_id>
 wordpress-image-optimizer/
 ├── wordpress-image-optimizer.php   ← bootstrap, constants (WOO_IMG_OPT_*), singleton
 ├── uninstall.php                   ← drops queue table and option on plugin delete
+├── woo-image-optimizer-flow.md     ← full system flow reference document
 ├── includes/
-│   ├── class-settings.php          ← woo_optimizer_settings option storage
-│   ├── class-queue.php             ← MySQL queue CRUD (enqueue, dequeue, mark done/failed)
-│   ├── class-api-client.php        ← HTTP client for all 4 Server 2 endpoints
-│   ├── class-woocommerce.php       ← product image detection + skip rules + auto-queue hook
+│   ├── class-settings.php          ← woo_optimizer_settings option + server1_ip field
+│   ├── class-queue.php             ← MySQL queue CRUD + retry_all_failed()
+│   ├── class-api-client.php        ← HTTP client (WP_Filesystem reads, multipart)
+│   ├── class-woocommerce.php       ← product image detection + skip rules + auto-queue
 │   ├── class-db-updater.php        ← all WP DB writes after optimization
 │   ├── class-processor.php         ← job orchestration: backup → optimize → write → update
 │   ├── class-cron.php              ← 60s WP-Cron schedule + transient lock
@@ -219,28 +194,14 @@ wordpress-image-optimizer/
 │   └── class-cli.php               ← WP-CLI command definitions
 ├── assets/
 │   ├── css/admin.css               ← admin styles (.wio-* classes)
-│   └── js/admin.js                 ← bulk optimizer UI (queue-all → batch loop)
+│   └── js/admin.js                 ← bulk optimizer UI + retry-failed handler
 └── server2-api/
-    ├── main.py                     ← FastAPI app: /optimize, /backup, GET/DELETE /backup/{key}
-    ├── optimizer.py                ← Pillow WebP conversion (RGB/RGBA, downscale-only)
-    ├── backup.py                   ← UUID-keyed file storage with path-traversal protection
+    ├── main.py                     ← FastAPI app + IPAllowlistMiddleware
+    ├── optimizer.py                ← Pillow WebP conversion
+    ├── backup.py                   ← UUID-keyed storage, path-traversal safe
     ├── requirements.txt
-    └── README.md                   ← Server 2 deployment guide (systemd, nginx, retention)
+    └── README.md                   ← SSL, nginx, systemd, IP restriction guide
 ```
-
----
-
-## Postmeta Written Per Attachment
-
-| Key | Value |
-|-----|-------|
-| `_woo_optimizer_status` | `done` |
-| `_woo_optimizer_backup_key` | UUID from Server 2 `/backup` |
-| `_woo_optimizer_original_file` | Original relative path (e.g. `2026/06/photo.jpg`) |
-| `_woo_optimizer_original_mime` | Original MIME type (e.g. `image/jpeg`) |
-| `_woo_optimizer_original_size` | Original file size in bytes |
-| `_woo_optimizer_optimized_size` | WebP file size in bytes |
-| `_woo_optimizer_saved_bytes` | Bytes saved |
 
 ---
 

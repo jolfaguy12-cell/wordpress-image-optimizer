@@ -159,6 +159,39 @@
     });
 
     // -----------------------------------------------------------------------
+    // Retry all failed jobs
+    // -----------------------------------------------------------------------
+
+    $('#wio-retry-failed').on('click', function () {
+        var $btn = $(this);
+        $btn.prop('disabled', true);
+
+        $.post(wooImgOpt.ajaxUrl, {
+            action: 'woo_optimizer_retry_failed',
+            nonce:  wooImgOpt.nonce
+        })
+        .done(function (res) {
+            if ( res.success ) {
+                var n = res.data.reset || 0;
+                addLog('Reset ' + n + ' failed job(s) back to pending.', 'info');
+                updateStats(res.data.stats);
+                if ( n > 0 ) {
+                    $btn.hide();
+                }
+            } else {
+                addLog('Retry failed: ' + (res.data || '?'), 'error');
+                $btn.prop('disabled', false);
+            }
+        })
+        .fail(function (xhr) {
+            addLog('Network error: ' + xhr.status, 'error');
+            $btn.prop('disabled', false);
+        });
+
+        $log.show();
+    });
+
+    // -----------------------------------------------------------------------
     // Per-image restore (media library column)
     // -----------------------------------------------------------------------
 

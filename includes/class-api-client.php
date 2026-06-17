@@ -153,9 +153,20 @@ class Woo_Image_Optimizer_API_Client {
 			if ( ! file_exists( $file_path ) ) {
 				continue;
 			}
+
+			// Use WP_Filesystem to avoid double-buffering large files in PHP memory.
+			global $wp_filesystem;
+			if ( empty( $wp_filesystem ) ) {
+				require_once ABSPATH . 'wp-admin/includes/file.php';
+				WP_Filesystem();
+			}
+			$data = $wp_filesystem->get_contents( $file_path );
+			if ( false === $data ) {
+				continue;
+			}
+
 			$filename = basename( $file_path );
 			$mime     = $this->file_mime( $file_path );
-			$data     = file_get_contents( $file_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 			$body    .= "--{$boundary}{$crlf}";
 			$body    .= "Content-Disposition: form-data; name=\"{$name}\"; filename=\"{$filename}\"{$crlf}";
 			$body    .= "Content-Type: {$mime}{$crlf}{$crlf}";
