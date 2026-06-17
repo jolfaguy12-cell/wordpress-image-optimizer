@@ -1,271 +1,367 @@
 <?php
 defined( 'ABSPATH' ) || exit;
 
-class BDSK_Optimizer_Admin {
+class Woo_Image_Optimizer_Admin {
 
-    private $settings;
-    private $engine;
+	private Woo_Image_Optimizer_Settings    $settings;
+	private Woo_Image_Optimizer_Queue       $queue;
+	private Woo_Image_Optimizer_Processor   $processor;
+	private Woo_Image_Optimizer_Restore     $restore;
+	private Woo_Image_Optimizer_WooCommerce $woocommerce;
 
-    public function __construct( BDSK_Optimizer_Settings $settings, BDSK_Optimizer_Engine $engine ) {
-        $this->settings = $settings;
-        $this->engine   = $engine;
+	public function __construct(
+		Woo_Image_Optimizer_Settings    $settings,
+		Woo_Image_Optimizer_Queue       $queue,
+		Woo_Image_Optimizer_Processor   $processor,
+		Woo_Image_Optimizer_Restore     $restore,
+		Woo_Image_Optimizer_WooCommerce $woocommerce
+	) {
+		$this->settings    = $settings;
+		$this->queue       = $queue;
+		$this->processor   = $processor;
+		$this->restore     = $restore;
+		$this->woocommerce = $woocommerce;
 
-        add_action( 'admin_menu',             [ $this, 'add_menu' ] );
-        add_action( 'admin_enqueue_scripts',  [ $this, 'enqueue_scripts' ] );
-        add_action( 'admin_post_bdsk_optimizer_save', [ $this, 'save_settings' ] );
+		add_action( 'admin_menu',            [ $this, 'add_menu' ] );
+		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
+		add_action( 'admin_post_woo_img_opt_save', [ $this, 'save_settings' ] );
 
-        // Media library column
-        add_filter( 'manage_media_columns',       [ $this, 'media_column' ] );
-        add_action( 'manage_media_custom_column', [ $this, 'media_column_content' ], 10, 2 );
-        add_filter( 'attachment_fields_to_edit',  [ $this, 'attachment_fields' ], 10, 2 );
-    }
+		// Media library column
+		add_filter( 'manage_media_columns',       [ $this, 'media_column' ] );
+		add_action( 'manage_media_custom_column', [ $this, 'media_column_content' ], 10, 2 );
 
-    public function add_menu() {
-        add_media_page(
-            'WordPress Image Optimizer',
-            'WordPress Image Optimizer',
-            'upload_files',
-            'bdsk-optimizer',
-            [ $this, 'render_page' ]
-        );
-    }
+		// AJAX handlers
+		add_action( 'wp_ajax_woo_optimizer_queue_all', [ $this, 'ajax_queue_all' ] );
+		add_action( 'wp_ajax_woo_optimizer_batch',     [ $this, 'ajax_batch' ] );
+		add_action( 'wp_ajax_woo_optimizer_stats',     [ $this, 'ajax_stats' ] );
+		add_action( 'wp_ajax_woo_optimizer_restore',   [ $this, 'ajax_restore' ] );
+	}
 
-    public function enqueue_scripts( $hook ) {
-        if ( 'media_page_bdsk-optimizer' !== $hook ) {
-            return;
-        }
+	// -----------------------------------------------------------------------
+	// Menu & Assets
+	// -----------------------------------------------------------------------
 
-        wp_enqueue_style(
-            'bdsk-optimizer',
-            BDSK_OPT_URL . 'assets/css/admin.css',
-            [],
-            BDSK_OPT_VERSION
-        );
+	public function add_menu(): void {
+		add_media_page(
+			__( 'WooCommerce Image Optimizer', 'woo-image-optimizer' ),
+			__( 'WooCommerce Image Optimizer', 'woo-image-optimizer' ),
+			'manage_options',
+			'woo-image-optimizer',
+			[ $this, 'render_page' ]
+		);
+	}
 
-        wp_enqueue_script(
-            'bdsk-optimizer',
-            BDSK_OPT_URL . 'assets/js/admin.js',
-            [ 'jquery' ],
-            BDSK_OPT_VERSION,
-            true
-        );
+	public function enqueue_scripts( string $hook ): void {
+		if ( 'media_page_woo-image-optimizer' !== $hook ) {
+			return;
+		}
 
-        wp_localize_script( 'bdsk-optimizer', 'bdskOptimizer', [
-            'ajaxUrl'   => admin_url( 'admin-ajax.php' ),
-            'nonce'     => wp_create_nonce( 'bdsk_optimizer_nonce' ),
-            'batchSize' => (int) $this->settings->get( 'batch_size', 5 ),
-            'i18n'      => [
-                'processing' => __( 'Processing…', 'bdsk-optimizer' ),
-                'done'       => __( 'All images optimized!', 'bdsk-optimizer' ),
-                'paused'     => __( 'Paused', 'bdsk-optimizer' ),
-                'error'      => __( 'Error', 'bdsk-optimizer' ),
-            ],
-        ] );
-    }
+		wp_enqueue_style(
+			'woo-image-optimizer',
+			WOO_IMG_OPT_URL . 'assets/css/admin.css',
+			[],
+			WOO_IMG_OPT_VERSION
+		);
 
-    public function save_settings() {
-        check_admin_referer( 'bdsk_optimizer_settings' );
+		wp_enqueue_script(
+			'woo-image-optimizer',
+			WOO_IMG_OPT_URL . 'assets/js/admin.js',
+			[ 'jquery' ],
+			WOO_IMG_OPT_VERSION,
+			true
+		);
 
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_die( 'Unauthorized' );
-        }
+		wp_localize_script( 'woo-image-optimizer', 'wooImgOpt', [
+			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+			'nonce'   => wp_create_nonce( 'woo_img_opt_nonce' ),
+			'i18n'    => [
+				'queuing'    => __( 'Queuing images…', 'woo-image-optimizer' ),
+				'processing' => __( 'Processing…', 'woo-image-optimizer' ),
+				'done'       => __( 'All done!', 'woo-image-optimizer' ),
+				'paused'     => __( 'Paused', 'woo-image-optimizer' ),
+			],
+		] );
+	}
 
-        $this->settings->save( $_POST );
+	// -----------------------------------------------------------------------
+	// Settings page
+	// -----------------------------------------------------------------------
 
-        wp_redirect( add_query_arg( [ 'page' => 'bdsk-optimizer', 'saved' => '1' ], admin_url( 'upload.php' ) ) );
-        exit;
-    }
+	public function save_settings(): void {
+		check_admin_referer( 'woo_img_opt_settings' );
 
-    public function render_page() {
-        $stats = $this->engine->get_stats();
-        $s     = $this->settings->get_all();
-        ?>
-        <div class="wrap bdsk-optimizer-wrap">
-            <h1>WordPress Image Optimizer</h1>
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Unauthorized' );
+		}
 
-            <?php if ( isset( $_GET['saved'] ) ) : ?>
-                <div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>
-            <?php endif; ?>
+		$this->settings->save( $_POST );
 
-            <!-- Stats Bar -->
-            <div class="bdsk-stats-bar">
-                <div class="bdsk-stat">
-                    <span class="bdsk-stat-number"><?php echo esc_html( $stats['total'] ); ?></span>
-                    <span class="bdsk-stat-label">Total Images</span>
-                </div>
-                <div class="bdsk-stat">
-                    <span class="bdsk-stat-number"><?php echo esc_html( $stats['optimized'] ); ?></span>
-                    <span class="bdsk-stat-label">Optimized</span>
-                </div>
-                <div class="bdsk-stat">
-                    <span class="bdsk-stat-number bdsk-unoptimized"><?php echo esc_html( $stats['unoptimized'] ); ?></span>
-                    <span class="bdsk-stat-label">Remaining</span>
-                </div>
-                <div class="bdsk-stat">
-                    <span class="bdsk-stat-number bdsk-saved"><?php echo esc_html( $stats['saved_human'] ); ?></span>
-                    <span class="bdsk-stat-label">Saved</span>
-                </div>
-                <div class="bdsk-stat bdsk-stat-engine">
-                    <span class="bdsk-stat-label">Engine</span>
-                    <span class="bdsk-engine-badge"><?php echo esc_html( $stats['engine'] ); ?></span>
-                </div>
-            </div>
+		wp_safe_redirect( add_query_arg(
+			[ 'page' => 'woo-image-optimizer', 'saved' => '1' ],
+			admin_url( 'upload.php' )
+		) );
+		exit;
+	}
 
-            <!-- Progress Bar -->
-            <div class="bdsk-progress-wrap" id="bdsk-progress-wrap" style="display:none">
-                <div class="bdsk-progress-bar-track">
-                    <div class="bdsk-progress-bar-fill" id="bdsk-progress-fill"></div>
-                </div>
-                <div class="bdsk-progress-text" id="bdsk-progress-text">0 / <?php echo esc_html( $stats['unoptimized'] ); ?></div>
-            </div>
+	public function render_page(): void {
+		$stats = $this->queue->get_stats();
+		$s     = $this->settings->get_all();
+		$api_configured = ! empty( $s['api_url'] ) && ! empty( $s['api_key'] );
+		?>
+		<div class="wrap wio-wrap">
+			<h1><?php esc_html_e( 'WooCommerce Image Optimizer', 'woo-image-optimizer' ); ?></h1>
 
-            <!-- Bulk Actions -->
-            <div class="bdsk-bulk-wrap">
-                <?php if ( $stats['unoptimized'] > 0 ) : ?>
-                    <button class="button button-primary button-large" id="bdsk-start">
-                        Optimize <?php echo esc_html( $stats['unoptimized'] ); ?> Remaining Images
-                    </button>
-                    <button class="button button-large" id="bdsk-pause" style="display:none">Pause</button>
-                    <button class="button button-large" id="bdsk-resume" style="display:none">Resume</button>
-                <?php else : ?>
-                    <p class="bdsk-all-done">All images are optimized!</p>
-                <?php endif; ?>
-            </div>
+			<?php if ( isset( $_GET['saved'] ) ) : ?>
+				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Settings saved.', 'woo-image-optimizer' ); ?></p></div>
+			<?php endif; ?>
 
-            <!-- Log -->
-            <div class="bdsk-log" id="bdsk-log" style="display:none">
-                <h3>Processing Log</h3>
-                <ul id="bdsk-log-list"></ul>
-            </div>
+			<?php if ( ! $api_configured ) : ?>
+				<div class="notice notice-warning">
+					<p><?php esc_html_e( 'Enter your Server 2 API URL and API Key below to start optimizing.', 'woo-image-optimizer' ); ?></p>
+				</div>
+			<?php endif; ?>
 
-            <hr>
+			<!-- Queue Stats Dashboard -->
+			<div class="wio-stats-bar" id="wio-stats-bar">
+				<div class="wio-stat">
+					<span class="wio-stat-number" id="wio-stat-total"><?php echo esc_html( $stats['total'] ); ?></span>
+					<span class="wio-stat-label"><?php esc_html_e( 'Total Queued', 'woo-image-optimizer' ); ?></span>
+				</div>
+				<div class="wio-stat">
+					<span class="wio-stat-number wio-done" id="wio-stat-done"><?php echo esc_html( $stats['done'] ); ?></span>
+					<span class="wio-stat-label"><?php esc_html_e( 'Done', 'woo-image-optimizer' ); ?></span>
+				</div>
+				<div class="wio-stat">
+					<span class="wio-stat-number wio-pending" id="wio-stat-pending"><?php echo esc_html( $stats['pending'] ); ?></span>
+					<span class="wio-stat-label"><?php esc_html_e( 'Pending', 'woo-image-optimizer' ); ?></span>
+				</div>
+				<div class="wio-stat">
+					<span class="wio-stat-number wio-failed" id="wio-stat-failed"><?php echo esc_html( $stats['failed'] ); ?></span>
+					<span class="wio-stat-label"><?php esc_html_e( 'Failed', 'woo-image-optimizer' ); ?></span>
+				</div>
+				<div class="wio-stat">
+					<span class="wio-stat-number wio-saved" id="wio-stat-saved"><?php echo esc_html( size_format( $stats['saved_bytes'] ) ); ?></span>
+					<span class="wio-stat-label"><?php esc_html_e( 'Bytes Saved', 'woo-image-optimizer' ); ?></span>
+				</div>
+			</div>
 
-            <!-- Settings -->
-            <h2>Settings</h2>
-            <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-                <input type="hidden" name="action" value="bdsk_optimizer_save">
-                <?php wp_nonce_field( 'bdsk_optimizer_settings' ); ?>
+			<!-- Progress Bar -->
+			<div class="wio-progress-wrap" id="wio-progress-wrap" style="display:none">
+				<div class="wio-progress-track">
+					<div class="wio-progress-fill" id="wio-progress-fill"></div>
+				</div>
+				<div class="wio-progress-text" id="wio-progress-text"></div>
+			</div>
 
-                <table class="form-table bdsk-settings-table">
-                    <tr>
-                        <th>Compression Mode</th>
-                        <td>
-                            <select name="compression_level">
-                                <option value="lossy" <?php selected( $s['compression_level'], 'lossy' ); ?>>Lossy (Recommended — best size/quality balance)</option>
-                                <option value="ultra-lossy" <?php selected( $s['compression_level'], 'ultra-lossy' ); ?>>Ultra Lossy (Smallest files, visible quality drop)</option>
-                                <option value="lossless" <?php selected( $s['compression_level'], 'lossless' ); ?>>Lossless (No quality loss, larger files)</option>
-                            </select>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>JPEG Quality <span class="bdsk-hint">(1–100)</span></th>
-                        <td>
-                            <input type="number" name="jpeg_quality" value="<?php echo esc_attr( $s['jpeg_quality'] ); ?>" min="1" max="100" class="small-text">
-                            <p class="description">Default: 82. Visible difference below 70.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>WebP Quality <span class="bdsk-hint">(1–100)</span></th>
-                        <td>
-                            <input type="number" name="webp_quality" value="<?php echo esc_attr( $s['webp_quality'] ); ?>" min="1" max="100" class="small-text">
-                            <p class="description">Default: 80. WebP at 80 ≈ JPEG at 85–90 visually.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>PNG Compression <span class="bdsk-hint">(0–9)</span></th>
-                        <td>
-                            <input type="number" name="png_compression" value="<?php echo esc_attr( $s['png_compression'] ); ?>" min="0" max="9" class="small-text">
-                            <p class="description">9 = maximum compression (lossless). Default: 6.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>Max Image Dimensions</th>
-                        <td>
-                            <input type="number" name="max_width" value="<?php echo esc_attr( $s['max_width'] ); ?>" min="0" class="small-text"> ×
-                            <input type="number" name="max_height" value="<?php echo esc_attr( $s['max_height'] ); ?>" min="0" class="small-text"> px
-                            <p class="description">Images larger than this will be resized on optimize. Set 0 to disable.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>Batch Size</th>
-                        <td>
-                            <input type="number" name="batch_size" value="<?php echo esc_attr( $s['batch_size'] ); ?>" min="1" max="20" class="small-text">
-                            <p class="description">Images to process per AJAX request. Lower if you hit timeouts. Default: 5.</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>Options</th>
-                        <td>
-                            <label><input type="checkbox" name="convert_webp" value="1" <?php checked( $s['convert_webp'] ); ?>> Generate WebP versions of JPEG/PNG</label><br>
-                            <label><input type="checkbox" name="serve_webp" value="1" <?php checked( $s['serve_webp'] ); ?>> Serve WebP to supporting browsers (PHP rewrite)</label><br>
-                            <label><input type="checkbox" name="auto_optimize" value="1" <?php checked( $s['auto_optimize'] ); ?>> Auto-optimize images on upload</label><br>
-                            <label><input type="checkbox" name="optimize_thumbnails" value="1" <?php checked( $s['optimize_thumbnails'] ); ?>> Optimize all thumbnail sizes</label><br>
-                            <label><input type="checkbox" name="backup_originals" value="1" <?php checked( $s['backup_originals'] ); ?>> Backup originals before optimizing</label><br>
-                            <label><input type="checkbox" name="strip_metadata" value="1" <?php checked( $s['strip_metadata'] ); ?>> Strip EXIF/IPTC metadata</label>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th>Excluded Paths</th>
-                        <td>
-                            <textarea name="excluded_paths" rows="4" class="large-text"><?php echo esc_textarea( implode( "\n", $s['excluded_paths'] ) ); ?></textarea>
-                            <p class="description">One path fragment per line. Images whose path contains any of these will be skipped.</p>
-                        </td>
-                    </tr>
-                </table>
+			<!-- Bulk Actions -->
+			<div class="wio-bulk-wrap">
+				<?php if ( $api_configured ) : ?>
+					<button class="button button-primary button-large" id="wio-start">
+						<?php esc_html_e( 'Optimize All Product Images', 'woo-image-optimizer' ); ?>
+					</button>
+					<button class="button button-large" id="wio-pause" style="display:none"><?php esc_html_e( 'Pause', 'woo-image-optimizer' ); ?></button>
+					<button class="button button-large" id="wio-resume" style="display:none"><?php esc_html_e( 'Resume', 'woo-image-optimizer' ); ?></button>
+				<?php else : ?>
+					<p class="description"><?php esc_html_e( 'Configure API settings below to enable optimization.', 'woo-image-optimizer' ); ?></p>
+				<?php endif; ?>
+			</div>
 
-                <p class="submit"><input type="submit" class="button button-primary" value="Save Settings"></p>
-            </form>
+			<!-- Processing Log -->
+			<div class="wio-log" id="wio-log" style="display:none">
+				<h3><?php esc_html_e( 'Processing Log', 'woo-image-optimizer' ); ?></h3>
+				<ul id="wio-log-list"></ul>
+			</div>
 
-            <!-- WebP Server Rules -->
-            <hr>
-            <h2>WebP Server Rules</h2>
-            <p>For the best WebP performance on the main site (Apache/cPanel), add these rules to your <code>.htaccess</code>:</p>
-            <textarea class="large-text code" rows="10" readonly onclick="this.select()"><?php echo esc_textarea( BDSK_Optimizer_WebP::get_htaccess_rules() ); ?></textarea>
+			<hr>
 
-            <p>For this Nginx dev server, add to the <code>server {}</code> block:</p>
-            <textarea class="large-text code" rows="8" readonly onclick="this.select()"><?php echo esc_textarea( BDSK_Optimizer_WebP::get_nginx_rules() ); ?></textarea>
-        </div>
-        <?php
-    }
+			<!-- Settings Form -->
+			<h2><?php esc_html_e( 'Settings', 'woo-image-optimizer' ); ?></h2>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="woo_img_opt_save">
+				<?php wp_nonce_field( 'woo_img_opt_settings' ); ?>
 
-    // Media library column
-    public function media_column( $columns ) {
-        $columns['bdsk_optimizer'] = 'Optimizer';
-        return $columns;
-    }
+				<table class="form-table wio-settings-table">
+					<tr>
+						<th scope="row"><label for="wio-api-url"><?php esc_html_e( 'Server 2 API URL', 'woo-image-optimizer' ); ?></label></th>
+						<td>
+							<input type="url" id="wio-api-url" name="api_url" value="<?php echo esc_attr( $s['api_url'] ); ?>" class="regular-text" placeholder="https://your-processing-server.com">
+							<p class="description"><?php esc_html_e( 'Base URL of the remote processing server. See data-api.md on Server 2.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wio-api-key"><?php esc_html_e( 'API Key', 'woo-image-optimizer' ); ?></label></th>
+						<td>
+							<input type="password" id="wio-api-key" name="api_key" value="<?php echo esc_attr( $s['api_key'] ); ?>" class="regular-text" autocomplete="new-password">
+							<p class="description"><?php esc_html_e( 'Bearer token from Server 2. Keep this secret.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wio-webp-quality"><?php esc_html_e( 'WebP Quality', 'woo-image-optimizer' ); ?> <span class="wio-hint">(1–100)</span></label></th>
+						<td>
+							<input type="number" id="wio-webp-quality" name="webp_quality" value="<?php echo esc_attr( $s['webp_quality'] ); ?>" min="1" max="100" class="small-text">
+							<p class="description"><?php esc_html_e( 'Default: 82. WebP at 82 ≈ JPEG at 90 visually.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Max Image Dimensions', 'woo-image-optimizer' ); ?></th>
+						<td>
+							<input type="number" name="max_width" value="<?php echo esc_attr( $s['max_width'] ); ?>" min="0" class="small-text"> ×
+							<input type="number" name="max_height" value="<?php echo esc_attr( $s['max_height'] ); ?>" min="0" class="small-text"> px
+							<p class="description"><?php esc_html_e( 'Server 2 will resize images larger than this. Set 0 for no limit.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="wio-batch-size"><?php esc_html_e( 'Batch Size', 'woo-image-optimizer' ); ?></label></th>
+						<td>
+							<input type="number" id="wio-batch-size" name="batch_size" value="<?php echo esc_attr( $s['batch_size'] ); ?>" min="1" max="50" class="small-text">
+							<p class="description"><?php esc_html_e( 'Jobs per cron run. Default: 5. Lower if you hit timeouts on slow connections.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Options', 'woo-image-optimizer' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="auto_optimize" value="1" <?php checked( $s['auto_optimize'] ); ?>>
+								<?php esc_html_e( 'Auto-queue product images when set on a product', 'woo-image-optimizer' ); ?>
+							</label>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Backup Retention', 'woo-image-optimizer' ); ?></th>
+						<td>
+							<label>
+								<input type="checkbox" name="backup_retention_enabled" value="1" id="wio-retention-toggle" <?php checked( $s['backup_retention_enabled'] ); ?>>
+								<?php esc_html_e( 'Enable automatic backup deletion after', 'woo-image-optimizer' ); ?>
+							</label>
+							<input type="number" name="backup_retention_days" value="<?php echo esc_attr( $s['backup_retention_days'] ); ?>" min="1" class="small-text" style="width:60px">
+							<?php esc_html_e( 'days', 'woo-image-optimizer' ); ?>
+							<p class="description"><?php esc_html_e( 'Default: disabled. When enabled, backups on Server 2 are deleted after the specified number of days.', 'woo-image-optimizer' ); ?></p>
+						</td>
+					</tr>
+				</table>
 
-    public function media_column_content( $column, $post_id ) {
-        if ( 'bdsk_optimizer' !== $column ) {
-            return;
-        }
+				<p class="submit">
+					<input type="submit" class="button button-primary" value="<?php esc_attr_e( 'Save Settings', 'woo-image-optimizer' ); ?>">
+				</p>
+			</form>
+		</div>
+		<?php
+	}
 
-        $mime = get_post_mime_type( $post_id );
-        if ( ! in_array( $mime, [ 'image/jpeg', 'image/png', 'image/gif' ], true ) ) {
-            echo '<span class="bdsk-col-na">—</span>';
-            return;
-        }
+	// -----------------------------------------------------------------------
+	// AJAX handlers
+	// -----------------------------------------------------------------------
 
-        $meta = get_post_meta( $post_id, '_bdsk_optimizer', true );
+	public function ajax_queue_all(): void {
+		check_ajax_referer( 'woo_img_opt_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized', 403 );
+		}
 
-        if ( $meta ) {
-            $saved = size_format( $meta['total_saved'] ?? 0 );
-            echo '<span class="bdsk-col-done" title="Optimized ' . esc_attr( $meta['optimized_at'] ?? '' ) . '">✓ ' . esc_html( $saved ) . ' saved</span>';
-        } else {
-            echo '<button class="button button-small bdsk-optimize-single" data-id="' . esc_attr( $post_id ) . '">Optimize</button>';
-        }
-    }
+		$ids     = $this->woocommerce->get_all_unoptimized_ids();
+		$queued  = 0;
+		$skipped = 0;
 
-    public function attachment_fields( $fields, $post ) {
-        $meta = get_post_meta( $post->ID, '_bdsk_optimizer', true );
+		foreach ( $ids as $attachment_id ) {
+			$product_id = $this->woocommerce->get_product_id_for_attachment( $attachment_id );
+			if ( $this->queue->enqueue( $attachment_id, $product_id ) ) {
+				$queued++;
+			} else {
+				$skipped++;
+			}
+		}
 
-        if ( $meta ) {
-            $fields['bdsk_optimizer'] = [
-                'label' => 'Optimizer',
-                'input' => 'html',
-                'html'  => '<span style="color:green">✓ Optimized — ' . esc_html( size_format( $meta['total_saved'] ?? 0 ) ) . ' saved</span>',
-            ];
-        }
+		wp_send_json_success( [
+			'queued'  => $queued,
+			'skipped' => $skipped,
+			'total'   => $queued + $skipped,
+			'stats'   => $this->queue->get_stats(),
+		] );
+	}
 
-        return $fields;
-    }
+	public function ajax_batch(): void {
+		check_ajax_referer( 'woo_img_opt_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized', 403 );
+		}
+
+		$batch_size = (int) $this->settings->get( 'batch_size', 5 );
+		$result     = $this->processor->process_batch( $batch_size );
+		$stats      = $this->queue->get_stats();
+
+		wp_send_json_success( [
+			'processed'   => $result['processed'],
+			'errors'      => $result['errors'],
+			'saved_bytes' => $result['saved_bytes'],
+			'done'        => $stats['pending'] === 0 && $stats['processing'] === 0,
+			'stats'       => $stats,
+		] );
+	}
+
+	public function ajax_stats(): void {
+		check_ajax_referer( 'woo_img_opt_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized', 403 );
+		}
+
+		wp_send_json_success( $this->queue->get_stats() );
+	}
+
+	public function ajax_restore(): void {
+		check_ajax_referer( 'woo_img_opt_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized', 403 );
+		}
+
+		$attachment_id = (int) ( $_POST['attachment_id'] ?? 0 );
+		if ( ! $attachment_id ) {
+			wp_send_json_error( 'Invalid attachment ID' );
+		}
+
+		$result = $this->restore->restore( $attachment_id );
+
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( $result->get_error_message() );
+		}
+
+		wp_send_json_success( [ 'message' => "Attachment #{$attachment_id} restored." ] );
+	}
+
+	// -----------------------------------------------------------------------
+	// Media library column
+	// -----------------------------------------------------------------------
+
+	public function media_column( array $columns ): array {
+		$columns['woo_img_optimizer'] = __( 'Img Optimizer', 'woo-image-optimizer' );
+		return $columns;
+	}
+
+	public function media_column_content( string $column, int $post_id ): void {
+		if ( 'woo_img_optimizer' !== $column ) {
+			return;
+		}
+
+		$status = get_post_meta( $post_id, '_woo_optimizer_status', true );
+
+		if ( $status === 'done' ) {
+			$saved = (int) get_post_meta( $post_id, '_woo_optimizer_saved_bytes', true );
+			$at    = get_post_meta( $post_id, '_woo_optimizer_optimized_at', true );
+			echo '<span class="wio-col-done" title="' . esc_attr( $at ) . '">&#10003; ' . esc_html( size_format( $saved ) ) . ' saved</span>';
+			echo ' <button class="button button-small wio-restore-btn" data-id="' . esc_attr( $post_id ) . '" title="Restore original">&#8617;</button>';
+			return;
+		}
+
+		if ( $status === 'failed' ) {
+			echo '<span class="wio-col-failed">&#10007; Failed</span>';
+			return;
+		}
+
+		// Check if in processing queue
+		if ( $this->queue->is_queued( $post_id ) ) {
+			echo '<span class="wio-col-queued">&#8987; Queued</span>';
+			return;
+		}
+
+		echo '<span class="wio-col-na">—</span>';
+	}
 }

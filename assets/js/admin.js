@@ -1,4 +1,4 @@
-/* global bdskOptimizer, jQuery */
+/* global wooImgOpt, jQuery */
 (function ($) {
     'use strict';
 
@@ -7,82 +7,108 @@
         paused:    false,
         processed: 0,
         saved:     0,
-        errors:    0,
-        total:     parseInt($('#bdsk-progress-text').text(), 10) || 0
+        errors:    0
     };
 
-    var $start      = $('#bdsk-start');
-    var $pause      = $('#bdsk-pause');
-    var $resume     = $('#bdsk-resume');
-    var $progressW  = $('#bdsk-progress-wrap');
-    var $fill       = $('#bdsk-progress-fill');
-    var $progressT  = $('#bdsk-progress-text');
-    var $log        = $('#bdsk-log');
-    var $logList    = $('#bdsk-log-list');
+    var $start     = $('#wio-start');
+    var $pause     = $('#wio-pause');
+    var $resume    = $('#wio-resume');
+    var $progressW = $('#wio-progress-wrap');
+    var $fill      = $('#wio-progress-fill');
+    var $progressT = $('#wio-progress-text');
+    var $log       = $('#wio-log');
+    var $logList   = $('#wio-log-list');
 
     // -----------------------------------------------------------------------
     // Bulk optimizer
     // -----------------------------------------------------------------------
 
     function startBulk() {
-        state.running = true;
-        state.paused  = false;
+        state.running   = true;
+        state.paused    = false;
+        state.processed = 0;
+        state.saved     = 0;
+        state.errors    = 0;
 
-        $start.hide();
+        $start.prop('disabled', true);
         $pause.show();
         $progressW.show();
         $log.show();
 
-        addLog('Starting bulk optimization…', 'info');
-        runBatch();
+        addLog(wooImgOpt.i18n.queuing, 'info');
+
+        // Step 1: enqueue all unoptimized product images
+        $.post(wooImgOpt.ajaxUrl, {
+            action: 'woo_optimizer_queue_all',
+            nonce:  wooImgOpt.nonce
+        })
+        .done(function (res) {
+            if ( ! res.success ) {
+                addLog('Queue error: ' + (res.data || '?'), 'error');
+                stopBulk();
+                return;
+            }
+            var d = res.data;
+            addLog('Queued ' + d.queued + ' image(s). ' + d.skipped + ' already in queue.', 'info');
+            updateStats(d.stats);
+
+            if ( d.stats.pending === 0 ) {
+                addLog('Nothing to process.', 'info');
+                stopBulk(true);
+                return;
+            }
+
+            // Step 2: process batches
+            runBatch();
+        })
+        .fail(function (xhr) {
+            addLog('Network error: ' + xhr.status, 'error');
+            stopBulk();
+        });
     }
 
     function runBatch() {
         if ( ! state.running || state.paused ) return;
 
-        $.post(bdskOptimizer.ajaxUrl, {
-            action:     'bdsk_optimizer_bulk',
-            nonce:      bdskOptimizer.nonce,
-            batch_size: bdskOptimizer.batchSize
+        $.post(wooImgOpt.ajaxUrl, {
+            action: 'woo_optimizer_batch',
+            nonce:  wooImgOpt.nonce
         })
         .done(function (res) {
             if ( ! res.success ) {
-                addLog('Server error: ' + (res.data || '?'), 'error');
+                addLog('Batch error: ' + (res.data || '?'), 'error');
                 stopBulk();
                 return;
             }
+            var d = res.data;
 
-            var data = res.data;
+            state.processed += d.processed || 0;
+            state.saved     += d.saved_bytes || 0;
+            state.errors    += (d.errors || []).length;
 
-            if ( data.done ) {
-                addLog('All images optimized!', 'info');
+            if ( d.processed > 0 ) {
+                addLog('Batch done — ' + d.processed + ' optimized, saved ' + formatBytes(d.saved_bytes || 0));
+            }
+            $.each(d.errors || [], function (i, err) {
+                addLog('Error: ' + err, 'error');
+            });
+
+            updateStats(d.stats);
+
+            if ( d.done ) {
+                addLog(wooImgOpt.i18n.done, 'info');
+                addLog(
+                    'Total: ' + state.processed + ' optimized | ' +
+                    state.errors + ' errors | ' +
+                    formatBytes(state.saved) + ' saved',
+                    'info'
+                );
                 stopBulk(true);
                 return;
             }
 
-            // Log processed
-            $.each(data.processed || [], function (i, item) {
-                state.processed++;
-                state.saved += item.saved_bytes || 0;
-                addLog('[' + item.id + '] ' + (item.title || 'Image') + ' → saved ' + item.saved_human);
-            });
-
-            // Log errors
-            $.each(data.errors || [], function (i, err) {
-                state.errors++;
-                addLog('[' + err.id + '] Error: ' + err.error, 'error');
-            });
-
-            // Update progress using live stats from server
-            if ( data.stats ) {
-                var s = data.stats;
-                var pct = s.total > 0 ? Math.round(s.optimized / s.total * 100) : 0;
-                $fill.css('width', pct + '%');
-                $progressT.text(s.optimized + ' / ' + s.total + ' (' + pct + '% — saved ' + s.saved_human + ')');
-            }
-
-            // Continue next batch (small delay to avoid hammering server)
-            setTimeout(runBatch, 200);
+            // Continue
+            setTimeout(runBatch, 300);
         })
         .fail(function (xhr) {
             addLog('Network error: ' + xhr.status, 'error');
@@ -94,18 +120,25 @@
         state.running = false;
         $pause.hide();
         $resume.hide();
-
+        $start.prop('disabled', done ? true : false);
         if ( done ) {
-            $start.text('All Done!').prop('disabled', true);
-            addLog(
-                'Finished. Processed: ' + state.processed +
-                ' | Errors: ' + state.errors +
-                ' | Saved: ' + formatBytes(state.saved),
-                'info'
-            );
-        } else {
-            $start.show();
+            $start.text(wooImgOpt.i18n.done);
         }
+    }
+
+    function updateStats(stats) {
+        if ( ! stats ) return;
+        $('#wio-stat-total').text(stats.total || 0);
+        $('#wio-stat-done').text(stats.done || 0);
+        $('#wio-stat-pending').text(stats.pending || 0);
+        $('#wio-stat-failed').text(stats.failed || 0);
+        $('#wio-stat-saved').text(formatBytes(stats.saved_bytes || 0));
+
+        var total   = (stats.done || 0) + (stats.pending || 0) + (stats.failed || 0);
+        var done    = stats.done || 0;
+        var pct     = total > 0 ? Math.round(done / total * 100) : 0;
+        $fill.css('width', pct + '%');
+        $progressT.text(done + ' / ' + total + ' (' + pct + '%)');
     }
 
     $start.on('click', startBulk);
@@ -114,7 +147,7 @@
         state.paused = true;
         $pause.hide();
         $resume.show();
-        addLog('Paused.', 'info');
+        addLog(wooImgOpt.i18n.paused, 'info');
     });
 
     $resume.on('click', function () {
@@ -126,30 +159,34 @@
     });
 
     // -----------------------------------------------------------------------
-    // Single image (media library)
+    // Per-image restore (media library column)
     // -----------------------------------------------------------------------
 
-    $(document).on('click', '.bdsk-optimize-single', function () {
+    $(document).on('click', '.wio-restore-btn', function () {
         var $btn = $(this);
         var id   = $btn.data('id');
 
+        if ( ! confirm('Restore original image from Server 2 backup? The WebP will be deleted.') ) {
+            return;
+        }
+
         $btn.prop('disabled', true).text('…');
 
-        $.post(bdskOptimizer.ajaxUrl, {
-            action:        'bdsk_optimizer_single',
-            nonce:         bdskOptimizer.nonce,
+        $.post(wooImgOpt.ajaxUrl, {
+            action:        'woo_optimizer_restore',
+            nonce:         wooImgOpt.nonce,
             attachment_id: id
         })
         .done(function (res) {
             if ( res.success ) {
-                $btn.replaceWith('<span class="bdsk-col-done">✓ ' + res.data.saved_human + ' saved</span>');
+                $btn.closest('td').html('<span class="wio-col-na">Restored</span>');
             } else {
-                $btn.prop('disabled', false).text('Retry');
-                alert('Error: ' + (res.data || 'unknown'));
+                alert('Restore failed: ' + (res.data || 'unknown error'));
+                $btn.prop('disabled', false).text('↩');
             }
         })
         .fail(function () {
-            $btn.prop('disabled', false).text('Retry');
+            $btn.prop('disabled', false).text('↩');
         });
     });
 
@@ -158,20 +195,19 @@
     // -----------------------------------------------------------------------
 
     function addLog(msg, type) {
-        var cls = type ? 'bdsk-log-' + type : '';
+        var cls = type ? 'wio-log-' + type : '';
         var $li = $('<li>').text('[' + timestamp() + '] ' + msg);
         if ( cls ) $li.addClass(cls);
         $logList.prepend($li);
     }
 
     function timestamp() {
-        var d = new Date();
-        return d.toTimeString().slice(0, 8);
+        return new Date().toTimeString().slice(0, 8);
     }
 
     function formatBytes(bytes) {
-        if ( bytes < 1024 )        return bytes + ' B';
-        if ( bytes < 1048576 )     return (bytes / 1024).toFixed(1) + ' KB';
+        if ( bytes < 1024 )    return bytes + ' B';
+        if ( bytes < 1048576 ) return (bytes / 1024).toFixed(1) + ' KB';
         return (bytes / 1048576).toFixed(2) + ' MB';
     }
 

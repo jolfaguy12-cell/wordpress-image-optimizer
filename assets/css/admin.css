@@ -1,7 +1,7 @@
-.bdsk-optimizer-wrap { max-width: 900px; }
+.wio-wrap { max-width: 900px; }
 
 /* Stats bar */
-.bdsk-stats-bar {
+.wio-stats-bar {
     display: flex;
     gap: 0;
     background: #fff;
@@ -11,14 +11,14 @@
     margin: 20px 0;
     box-shadow: 0 1px 3px rgba(0,0,0,.06);
 }
-.bdsk-stat {
+.wio-stat {
     flex: 1;
     padding: 18px 20px;
     text-align: center;
     border-right: 1px solid #eee;
 }
-.bdsk-stat:last-child { border-right: none; }
-.bdsk-stat-number {
+.wio-stat:last-child { border-right: none; }
+.wio-stat-number {
     display: block;
     font-size: 2rem;
     font-weight: 700;
@@ -26,119 +26,90 @@
     line-height: 1;
     margin-bottom: 4px;
 }
-.bdsk-stat-label {
+.wio-stat-label {
     display: block;
     font-size: .75rem;
     color: #777;
     text-transform: uppercase;
     letter-spacing: .04em;
 }
-.bdsk-unoptimized { color: #d63638; }
-.bdsk-saved       { color: #00a32a; }
-.bdsk-stat-engine { flex: 1.5; }
-.bdsk-engine-badge {
-    display: inline-block;
-    background: #e8f0fe;
-    color: #1a73e8;
-    font-size: .75rem;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-weight: 600;
-    margin-top: 4px;
-}
+.wio-done    { color: #00a32a; }
+.wio-pending { color: #f0b849; }
+.wio-failed  { color: #d63638; }
+.wio-saved   { color: #0073aa; }
 
 /* Progress */
-.bdsk-progress-wrap {
-    margin: 16px 0;
-}
-.bdsk-progress-bar-track {
+.wio-progress-wrap { margin: 16px 0; }
+.wio-progress-track {
     background: #f0f0f1;
     border-radius: 6px;
     height: 14px;
     overflow: hidden;
 }
-.bdsk-progress-bar-fill {
+.wio-progress-fill {
     background: linear-gradient(90deg, #00a32a, #46b450);
     height: 100%;
     width: 0%;
     transition: width .3s ease;
     border-radius: 6px;
 }
-.bdsk-progress-text {
+.wio-progress-text {
     margin-top: 6px;
     font-size: .8rem;
     color: #555;
 }
 
-/* Bulk wrap */
-.bdsk-bulk-wrap {
+/* Bulk buttons */
+.wio-bulk-wrap {
     margin: 10px 0 20px;
     display: flex;
     gap: 10px;
     align-items: center;
 }
-.bdsk-all-done {
-    color: #00a32a;
-    font-weight: 600;
-    font-size: 1rem;
-}
 
 /* Log */
-.bdsk-log {
+.wio-log {
     background: #1e1e1e;
     border-radius: 6px;
     padding: 16px;
     margin: 20px 0;
-    max-height: 300px;
+    max-height: 280px;
     overflow-y: auto;
 }
-.bdsk-log h3 { color: #ccc; margin: 0 0 10px; font-size: .85rem; }
-#bdsk-log-list {
+.wio-log h3 { color: #ccc; margin: 0 0 10px; font-size: .85rem; }
+#wio-log-list {
     list-style: none;
     margin: 0;
     padding: 0;
     font-family: monospace;
     font-size: .78rem;
 }
-#bdsk-log-list li {
+#wio-log-list li {
     padding: 2px 0;
     color: #98c379;
     border-bottom: 1px solid #2a2a2a;
 }
-#bdsk-log-list li.bdsk-log-error { color: #e06c75; }
-#bdsk-log-list li.bdsk-log-info  { color: #61afef; }
+#wio-log-list li.wio-log-error { color: #e06c75; }
+#wio-log-list li.wio-log-info  { color: #61afef; }
 
 /* Settings table */
-.bdsk-settings-table th {
+.wio-settings-table th {
     width: 220px;
     vertical-align: top;
-    padding-top: 12px;
+    padding-top: 14px;
 }
-.bdsk-settings-table td label {
-    display: block;
-    margin-bottom: 5px;
-}
-.bdsk-hint {
-    font-weight: 400;
-    color: #888;
-    font-size: .85em;
-}
+.wio-settings-table td label { display: block; margin-bottom: 5px; }
+.wio-hint { font-weight: 400; color: #888; font-size: .85em; }
 
 /* Media library column */
-.bdsk-col-done  { color: #00a32a; font-size: .8rem; }
-.bdsk-col-na    { color: #bbb; }
-.bdsk-optimize-single {
+.wio-col-done   { color: #00a32a; font-size: .8rem; }
+.wio-col-failed { color: #d63638; font-size: .8rem; }
+.wio-col-queued { color: #f0b849; font-size: .8rem; }
+.wio-col-na     { color: #bbb; }
+.wio-restore-btn {
     font-size: .75rem !important;
     padding: 0 6px !important;
     height: 22px !important;
     line-height: 20px !important;
-}
-
-/* Code boxes */
-.bdsk-optimizer-wrap textarea.code {
-    font-family: monospace;
-    font-size: .78rem;
-    background: #f6f8fa;
-    border: 1px solid #e1e4e8;
-    resize: vertical;
+    margin-left: 4px !important;
 }
