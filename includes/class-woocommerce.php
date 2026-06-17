@@ -71,6 +71,9 @@ class Woo_Image_Optimizer_WooCommerce {
 		if ( $this->is_avif( $attachment_id ) ) {
 			return true;
 		}
+		if ( $this->is_webp( $attachment_id ) ) {
+			return true;
+		}
 		return get_post_meta( $attachment_id, '_woo_optimizer_status', true ) === 'done';
 	}
 
@@ -80,6 +83,14 @@ class Woo_Image_Optimizer_WooCommerce {
 		}
 		$file = get_attached_file( $attachment_id );
 		return $file && strtolower( pathinfo( $file, PATHINFO_EXTENSION ) ) === 'avif';
+	}
+
+	private function is_webp( int $attachment_id ): bool {
+		if ( get_post_mime_type( $attachment_id ) === 'image/webp' ) {
+			return true;
+		}
+		$file = get_attached_file( $attachment_id );
+		return $file && strtolower( pathinfo( $file, PATHINFO_EXTENSION ) ) === 'webp';
 	}
 
 	// -----------------------------------------------------------------------
@@ -99,6 +110,7 @@ class Woo_Image_Optimizer_WooCommerce {
 			"SELECT DISTINCT CAST(pm.meta_value AS UNSIGNED)
 			 FROM {$wpdb->postmeta} pm
 			 INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+			 INNER JOIN {$wpdb->posts} att ON att.ID = CAST(pm.meta_value AS UNSIGNED)
 			 LEFT JOIN {$wpdb->postmeta} opt
 			       ON opt.post_id = CAST(pm.meta_value AS UNSIGNED)
 			      AND opt.meta_key = '_woo_optimizer_status'
@@ -106,6 +118,7 @@ class Woo_Image_Optimizer_WooCommerce {
 			   AND p.post_type IN ('product','product_variation')
 			   AND p.post_status NOT IN ('trash','auto-draft')
 			   AND pm.meta_value > 0
+			   AND att.post_mime_type NOT IN ('image/webp','image/avif')
 			   AND (opt.meta_value IS NULL OR opt.meta_value != 'done')"
 		);
 
@@ -146,9 +159,9 @@ class Woo_Image_Optimizer_WooCommerce {
 			array_values( $gallery_ids )
 		) ) ) );
 
-		// SQL already excludes done attachments; only AVIF check remains.
+		// SQL already excludes done/webp/avif for featured; apply all skip rules to gallery too.
 		return array_values( array_filter( $all, function ( int $id ) {
-			return ! $this->is_avif( $id );
+			return ! $this->should_skip( $id );
 		} ) );
 	}
 
