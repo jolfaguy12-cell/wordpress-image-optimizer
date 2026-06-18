@@ -16,6 +16,14 @@ class Woo_Image_Optimizer_Cron {
 
 		add_filter( 'cron_schedules', [ $this, 'add_schedules' ] );
 		add_action( self::HOOK,       [ $this, 'tick' ] );
+		add_action( 'init',           [ $this, 'ensure_scheduled' ] );
+	}
+
+	// Self-healing: reschedule on every page load if the cron went missing.
+	public function ensure_scheduled(): void {
+		if ( ! wp_next_scheduled( self::HOOK ) ) {
+			self::activate();
+		}
 	}
 
 	public function add_schedules( array $schedules ): array {
