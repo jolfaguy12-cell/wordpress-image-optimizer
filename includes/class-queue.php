@@ -144,7 +144,7 @@ class Woo_Image_Optimizer_Queue {
 		global $wpdb;
 		$count = $wpdb->get_var( $wpdb->prepare(
 			"SELECT COUNT(*) FROM " . self::table_name() . "
-			 WHERE attachment_id = %d AND status IN ('pending','processing','done','failed')",
+			 WHERE attachment_id = %d AND status IN ('pending','processing')",
 			$attachment_id
 		) );
 		return (int) $count > 0;

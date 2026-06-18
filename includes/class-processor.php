@@ -127,6 +127,17 @@ class Woo_Image_Optimizer_Processor {
 		// --- 6. Delete original file (safely backed up on Server 2) ---
 		wp_delete_file( $file_path );
 
+		// For images above WordPress's big-image threshold (default 2560px), WP keeps the
+		// unscaled original alongside the scaled version. _wp_attached_file points to the
+		// scaled one, which is what we backed up and just deleted. Also delete the unscaled
+		// original so it doesn't linger as a wasted large file on disk.
+		if ( function_exists( 'wp_get_original_image_path' ) ) {
+			$unscaled_original = wp_get_original_image_path( $attachment_id );
+			if ( $unscaled_original && $unscaled_original !== $file_path && file_exists( $unscaled_original ) ) {
+				wp_delete_file( $unscaled_original );
+			}
+		}
+
 		// --- 7. Update WordPress DB ---
 		$db_result = $this->db->update_all(
 			$attachment_id,

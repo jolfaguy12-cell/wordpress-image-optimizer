@@ -30,8 +30,15 @@ class Woo_Image_Optimizer_DB_Updater {
 		$relative_webp = ltrim( str_replace( $upload_dir['basedir'], '', $webp_full_path ), '/\\' );
 		update_post_meta( $attachment_id, '_wp_attached_file', $relative_webp );
 
-		// 8 — Regenerate all thumbnail sizes from the new WebP (runs locally, lightweight resize only)
+		// 8 — Regenerate all thumbnail sizes from the new WebP.
+		// Disable big-image scaling for this call: our WebP is already web-sized (≤ max_width/max_height),
+		// and the scaling hook would overwrite _wp_attached_file with a "*-scaled.webp" path, corrupting
+		// all future meta reads and restores.
+		add_filter( 'big_image_size_threshold', '__return_false' );
 		$new_meta = wp_generate_attachment_metadata( $attachment_id, $webp_full_path );
+		remove_filter( 'big_image_size_threshold', '__return_false' );
+		// Re-assert the correct path: any hook that ran inside the call may have changed it.
+		update_post_meta( $attachment_id, '_wp_attached_file', $relative_webp );
 		if ( ! is_wp_error( $new_meta ) && ! empty( $new_meta ) ) {
 			wp_update_attachment_metadata( $attachment_id, $new_meta );
 		}
