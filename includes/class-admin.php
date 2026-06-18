@@ -24,18 +24,16 @@ class Woo_Image_Optimizer_Admin {
 
 		add_action( 'admin_menu',            [ $this, 'add_menu' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_scripts' ] );
-		add_action( 'admin_post_woo_img_opt_save', [ $this, 'save_settings' ] );
+		add_action( 'admin_post_woo_img_opt_save',         [ $this, 'save_settings' ] );
+		add_action( 'admin_post_woo_img_opt_queue_all',    [ $this, 'handle_queue_all' ] );
+		add_action( 'admin_post_woo_img_opt_retry_failed', [ $this, 'handle_retry_failed' ] );
 
 		// Media library column
 		add_filter( 'manage_media_columns',       [ $this, 'media_column' ] );
 		add_action( 'manage_media_custom_column', [ $this, 'media_column_content' ], 10, 2 );
 
-		// AJAX handlers
-		add_action( 'wp_ajax_woo_optimizer_queue_all',       [ $this, 'ajax_queue_all' ] );
-		add_action( 'wp_ajax_woo_optimizer_batch',           [ $this, 'ajax_batch' ] );
-		add_action( 'wp_ajax_woo_optimizer_stats',           [ $this, 'ajax_stats' ] );
+		// AJAX handlers (restore + test-connection only; bulk is now form POST)
 		add_action( 'wp_ajax_woo_optimizer_restore',         [ $this, 'ajax_restore' ] );
-		add_action( 'wp_ajax_woo_optimizer_retry_failed',    [ $this, 'ajax_retry_failed' ] );
 		add_action( 'wp_ajax_woo_optimizer_test_connection', [ $this, 'ajax_test_connection' ] );
 	}
 
@@ -74,16 +72,10 @@ class Woo_Image_Optimizer_Admin {
 		);
 
 		wp_localize_script( 'woo-image-optimizer', 'wooImgOpt', [
-			'ajaxUrl'      => admin_url( 'admin-ajax.php' ),
-			'nonce'        => wp_create_nonce( 'woo_img_opt_nonce' ),
-			'pollInterval' => 10000,
-			'i18n'         => [
-				'queuing'    => __( 'Queuing images…', 'woo-image-optimizer' ),
-				'processing' => __( 'Processing…', 'woo-image-optimizer' ),
-				'done'       => __( 'All done!', 'woo-image-optimizer' ),
-				'paused'     => __( 'Paused', 'woo-image-optimizer' ),
-				'cronNote'   => __( 'Background cron is processing — checking progress every %ds.', 'woo-image-optimizer' ),
-				'testConn'   => [
+			'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+			'nonce'   => wp_create_nonce( 'woo_img_opt_nonce' ),
+			'i18n'    => [
+				'testConn' => [
 					'testing' => __( 'Testing…', 'woo-image-optimizer' ),
 					'ok'      => __( 'Connected', 'woo-image-optimizer' ),
 					'error'   => __( 'Error', 'woo-image-optimizer' ),
@@ -118,6 +110,46 @@ class Woo_Image_Optimizer_Admin {
 		exit;
 	}
 
+	public function handle_queue_all(): void {
+		check_admin_referer( 'woo_img_opt_queue_all' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Unauthorized' );
+		}
+
+		$ids     = $this->woocommerce->get_all_unoptimized_ids();
+		$queued  = 0;
+		$skipped = 0;
+		foreach ( $ids as $attachment_id ) {
+			$product_id = $this->woocommerce->get_product_id_for_attachment( $attachment_id );
+			if ( $this->queue->enqueue( $attachment_id, $product_id ) ) {
+				$queued++;
+			} else {
+				$skipped++;
+			}
+		}
+
+		wp_safe_redirect( add_query_arg(
+			[ 'page' => 'woo-image-optimizer', 'queued' => $queued, 'skipped' => $skipped ],
+			admin_url( 'upload.php' )
+		) );
+		exit;
+	}
+
+	public function handle_retry_failed(): void {
+		check_admin_referer( 'woo_img_opt_retry_failed' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Unauthorized' );
+		}
+
+		$reset = $this->queue->retry_all_failed();
+
+		wp_safe_redirect( add_query_arg(
+			[ 'page' => 'woo-image-optimizer', 'reset' => $reset ],
+			admin_url( 'upload.php' )
+		) );
+		exit;
+	}
+
 	public function render_page(): void {
 		$stats          = $this->queue->get_stats();
 		$s              = $this->settings->get_all();
@@ -134,6 +166,29 @@ class Woo_Image_Optimizer_Admin {
 
 			<?php if ( isset( $_GET['saved'] ) ) : ?>
 				<div class="notice notice-success is-dismissible"><p><?php esc_html_e( 'Settings saved.', 'woo-image-optimizer' ); ?></p></div>
+			<?php endif; ?>
+
+			<?php if ( isset( $_GET['queued'] ) ) :
+				$_queued  = (int) $_GET['queued'];
+				$_skipped = (int) ( $_GET['skipped'] ?? 0 );
+				if ( $_queued > 0 ) : ?>
+					<div class="notice notice-success is-dismissible">
+						<p><?php printf(
+							esc_html__( '%1$d image(s) queued for background optimization. %2$d already in queue or done. Refresh this page to track progress.', 'woo-image-optimizer' ),
+							$_queued, $_skipped
+						); ?></p>
+					</div>
+				<?php else : ?>
+					<div class="notice notice-info is-dismissible">
+						<p><?php esc_html_e( 'No new images to queue — all eligible product images are already optimized or in queue.', 'woo-image-optimizer' ); ?></p>
+					</div>
+				<?php endif;
+			endif; ?>
+
+			<?php if ( isset( $_GET['reset'] ) ) : ?>
+				<div class="notice notice-success is-dismissible">
+					<p><?php printf( esc_html__( '%d failed job(s) reset to pending and will be retried on the next cron run.', 'woo-image-optimizer' ), (int) $_GET['reset'] ); ?></p>
+				</div>
 			<?php endif; ?>
 
 			<?php if ( ! $api_configured ) : ?>
@@ -184,11 +239,11 @@ class Woo_Image_Optimizer_Admin {
 			</div>
 
 			<!-- Progress Bar -->
-			<div class="wio-progress-wrap" id="wio-progress-wrap">
+			<div class="wio-progress-wrap">
 				<div class="wio-progress-track">
-					<div class="wio-progress-fill" id="wio-progress-fill" style="width:<?php echo esc_attr( $pct ); ?>%"></div>
+					<div class="wio-progress-fill" style="width:<?php echo esc_attr( $pct ); ?>%"></div>
 				</div>
-				<div class="wio-progress-text" id="wio-progress-text">
+				<div class="wio-progress-text">
 					<?php printf( esc_html__( '%1$d of %2$d optimized (%3$d%%)', 'woo-image-optimizer' ), $done, $eligible, $pct ); ?>
 				</div>
 			</div>
@@ -196,23 +251,28 @@ class Woo_Image_Optimizer_Admin {
 			<!-- Bulk Actions -->
 			<div class="wio-bulk-wrap">
 				<?php if ( $api_configured ) : ?>
-					<button class="button button-primary button-large" id="wio-start">
-						<?php esc_html_e( 'Optimize All Product Images', 'woo-image-optimizer' ); ?>
-					</button>
-					<button class="button button-large" id="wio-pause" style="display:none"><?php esc_html_e( 'Pause', 'woo-image-optimizer' ); ?></button>
-					<button class="button button-large" id="wio-resume" style="display:none"><?php esc_html_e( 'Resume', 'woo-image-optimizer' ); ?></button>
-					<button class="button button-large wio-btn-retry" id="wio-retry-failed"<?php echo $failed === 0 ? ' style="display:none"' : ''; ?>>
-						<?php esc_html_e( 'Retry Failed', 'woo-image-optimizer' ); ?> (<span id="wio-retry-count"><?php echo esc_html( $failed ); ?></span>)
-					</button>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+						<input type="hidden" name="action" value="woo_img_opt_queue_all">
+						<?php wp_nonce_field( 'woo_img_opt_queue_all' ); ?>
+						<button type="submit" class="button button-primary button-large">
+							<?php esc_html_e( 'Optimize All Product Images', 'woo-image-optimizer' ); ?>
+						</button>
+					</form>
+					<?php if ( $failed > 0 ) : ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+						<input type="hidden" name="action" value="woo_img_opt_retry_failed">
+						<?php wp_nonce_field( 'woo_img_opt_retry_failed' ); ?>
+						<button type="submit" class="button wio-btn-retry">
+							<?php printf( esc_html__( 'Retry Failed (%d)', 'woo-image-optimizer' ), $failed ); ?>
+						</button>
+					</form>
+					<?php endif; ?>
+					<a href="<?php echo esc_url( add_query_arg( 'page', 'woo-image-optimizer', admin_url( 'upload.php' ) ) ); ?>" class="button">
+						&#8635; <?php esc_html_e( 'Refresh Stats', 'woo-image-optimizer' ); ?>
+					</a>
 				<?php else : ?>
 					<p class="description"><?php esc_html_e( 'Configure API settings below to enable optimization.', 'woo-image-optimizer' ); ?></p>
 				<?php endif; ?>
-			</div>
-
-			<!-- Processing Log -->
-			<div class="wio-log" id="wio-log" style="display:none">
-				<h3><?php esc_html_e( 'Processing Log', 'woo-image-optimizer' ); ?></h3>
-				<ul id="wio-log-list"></ul>
 			</div>
 
 			<hr>
