@@ -66,7 +66,17 @@ class Woo_Image_Optimizer_Processor {
 		// --- 1. Resolve file path ---
 		$file_path = get_attached_file( $attachment_id );
 		if ( ! $file_path || ! file_exists( $file_path ) ) {
-			return $this->fail_job( $job_id, $attempts, "File not found for attachment #{$attachment_id}" );
+			// Detect corrupted state: _wp_attached_file points to a missing .webp from a prior
+			// partial optimization. Report clearly rather than retrying silently.
+			$attached = get_post_meta( $attachment_id, '_wp_attached_file', true );
+			$suffix   = strtolower( pathinfo( (string) $attached, PATHINFO_EXTENSION ) );
+			if ( $suffix === 'webp' ) {
+				return $this->fail_job( $job_id, 3, // force to failed immediately
+					"Attachment #{$attachment_id}: _wp_attached_file points to a missing WebP ({$attached}). " .
+					'The file was deleted without restoring the original. Fix the attachment meta manually.'
+				);
+			}
+			return $this->fail_job( $job_id, $attempts, "File not found for attachment #{$attachment_id}: {$file_path}" );
 		}
 
 		// --- 2. Backup (skip if already backed up from a previous attempt) ---
