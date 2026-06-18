@@ -445,6 +445,11 @@ class Woo_Image_Optimizer_Admin {
 			wp_send_json_error( 'Invalid attachment ID' );
 		}
 
+		// Restore downloads a full image from Server 2 and regenerates thumbnails.
+		// Give it enough time and memory to complete on shared hosting.
+		@set_time_limit( 120 );
+		wp_raise_memory_limit( 'image' );
+
 		$result = $this->restore->restore( $attachment_id );
 
 		if ( is_wp_error( $result ) ) {

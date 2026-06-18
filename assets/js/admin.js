@@ -64,7 +64,11 @@
                 $btn.prop('disabled', false).text('↩');
             }
         })
-        .fail(function () {
+        .fail(function (xhr) {
+            var msg = xhr.status === 0
+                ? 'Request timed out. The restore may still complete — refresh the page in 30 seconds to check.'
+                : 'Network error ' + xhr.status + '. Please try again.';
+            alert(msg);
             $btn.prop('disabled', false).text('↩');
         });
     });
