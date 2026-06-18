@@ -79,6 +79,19 @@ class Woo_Image_Optimizer_Processor {
 			return $this->fail_job( $job_id, $attempts, "File not found for attachment #{$attachment_id}: {$file_path}" );
 		}
 
+		// Detect partial-run recovery: db_updater already converted the file to WebP in a previous
+		// attempt but the job never got marked done (e.g. PHP timeout after db_updater, before
+		// queue->mark_done). The WebP on disk is the correct final output — close the job without
+		// re-processing. This also prevents step 5 from overwriting _woo_optimizer_original_file
+		// with the WebP path, which would permanently break future restores.
+		if ( 'webp' === strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) ) ) {
+			if ( get_post_meta( $attachment_id, '_woo_optimizer_status', true ) !== 'done' ) {
+				update_post_meta( $attachment_id, '_woo_optimizer_status', 'done' );
+			}
+			$this->queue->mark_done( $job_id );
+			return [ 'saved_bytes' => (int) get_post_meta( $attachment_id, '_woo_optimizer_saved_bytes', true ) ];
+		}
+
 		// --- 2. Backup (skip if already backed up from a previous attempt) ---
 		$backup_key = get_post_meta( $attachment_id, '_woo_optimizer_backup_key', true );
 		if ( ! $backup_key ) {
@@ -119,10 +132,14 @@ class Woo_Image_Optimizer_Processor {
 		// --- 5. Capture original metadata BEFORE any DB changes (for thumbnail cleanup) ---
 		$original_meta = wp_get_attachment_metadata( $attachment_id );
 
-		// Also store original _wp_attached_file for restore
+		// Store original _wp_attached_file for restore — only if it is a non-WebP path.
+		// (If somehow we reach here with a webp _wp_attached_file, leave the existing value intact
+		// so a previous correct value is not overwritten with a corrupted one.)
 		$original_attached_file = get_post_meta( $attachment_id, '_wp_attached_file', true );
-		update_post_meta( $attachment_id, '_woo_optimizer_original_file', $original_attached_file );
-		update_post_meta( $attachment_id, '_woo_optimizer_original_mime', get_post_mime_type( $attachment_id ) );
+		if ( 'webp' !== strtolower( pathinfo( (string) $original_attached_file, PATHINFO_EXTENSION ) ) ) {
+			update_post_meta( $attachment_id, '_woo_optimizer_original_file', $original_attached_file );
+			update_post_meta( $attachment_id, '_woo_optimizer_original_mime', get_post_mime_type( $attachment_id ) );
+		}
 
 		// --- 6. Delete original file (safely backed up on Server 2) ---
 		wp_delete_file( $file_path );

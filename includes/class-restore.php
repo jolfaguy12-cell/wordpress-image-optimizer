@@ -31,6 +31,25 @@ class Woo_Image_Optimizer_Restore {
 			return new WP_Error( 'no_original_path', "Original file path not stored for attachment #{$attachment_id}" );
 		}
 
+		// Guard against corrupted state where _woo_optimizer_original_file was set to a .webp path
+		// (happens when a retry ran with _wp_attached_file already changed to webp by a prior db_updater).
+		// Correct by replacing the extension using the stored original mime type.
+		if ( 'webp' === strtolower( pathinfo( $original_file, PATHINFO_EXTENSION ) ) ) {
+			$mime_ext_map = [
+				'image/jpeg' => 'jpg',
+				'image/png'  => 'png',
+				'image/gif'  => 'gif',
+			];
+			$correct_ext = $mime_ext_map[ $original_mime ] ?? null;
+			if ( $correct_ext ) {
+				$original_file = preg_replace( '/\.webp$/i', '.' . $correct_ext, $original_file );
+			} else {
+				return new WP_Error( 'corrupted_original_path',
+					"Original file path is .webp and the original mime type is unknown. " .
+					"Cannot restore attachment #{$attachment_id} automatically." );
+			}
+		}
+
 		// 1. Download original from Server 2
 		$binary = $this->api->get_backup( $backup_key );
 		if ( is_wp_error( $binary ) ) {
