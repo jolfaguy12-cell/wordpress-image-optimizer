@@ -175,6 +175,41 @@
     });
 
     // -----------------------------------------------------------------------
+    // Test connection
+    // -----------------------------------------------------------------------
+
+    $('#wio-test-connection').on('click', function () {
+        var $btn    = $(this);
+        var $status = $('#wio-connection-status');
+
+        $btn.prop('disabled', true);
+        $status.removeClass('wio-conn-ok wio-conn-error wio-conn-warn')
+               .text(wooImgOpt.i18n.testConn.testing);
+
+        $.post(wooImgOpt.ajaxUrl, {
+            action: 'woo_optimizer_test_connection',
+            nonce:  wooImgOpt.nonce
+        })
+        .done(function (res) {
+            if ( res.success ) {
+                $status.addClass('wio-conn-ok')
+                       .text(wooImgOpt.i18n.testConn.ok + ' (' + res.data.ms + 'ms)');
+            } else {
+                var msg = (res.data && res.data.message) ? res.data.message : wooImgOpt.i18n.testConn.error;
+                var ms  = (res.data && res.data.ms)      ? ' (' + res.data.ms + 'ms)' : '';
+                $status.addClass('wio-conn-error').text(msg + ms);
+            }
+        })
+        .fail(function (xhr) {
+            $status.addClass('wio-conn-error')
+                   .text(wooImgOpt.i18n.testConn.error + ': network ' + xhr.status);
+        })
+        .always(function () {
+            $btn.prop('disabled', false);
+        });
+    });
+
+    // -----------------------------------------------------------------------
     // Per-image restore (media library column)
     // -----------------------------------------------------------------------
 

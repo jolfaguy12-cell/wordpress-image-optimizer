@@ -31,11 +31,12 @@ class Woo_Image_Optimizer_Admin {
 		add_action( 'manage_media_custom_column', [ $this, 'media_column_content' ], 10, 2 );
 
 		// AJAX handlers
-		add_action( 'wp_ajax_woo_optimizer_queue_all',    [ $this, 'ajax_queue_all' ] );
-		add_action( 'wp_ajax_woo_optimizer_batch',        [ $this, 'ajax_batch' ] );
-		add_action( 'wp_ajax_woo_optimizer_stats',        [ $this, 'ajax_stats' ] );
-		add_action( 'wp_ajax_woo_optimizer_restore',      [ $this, 'ajax_restore' ] );
-		add_action( 'wp_ajax_woo_optimizer_retry_failed', [ $this, 'ajax_retry_failed' ] );
+		add_action( 'wp_ajax_woo_optimizer_queue_all',       [ $this, 'ajax_queue_all' ] );
+		add_action( 'wp_ajax_woo_optimizer_batch',           [ $this, 'ajax_batch' ] );
+		add_action( 'wp_ajax_woo_optimizer_stats',           [ $this, 'ajax_stats' ] );
+		add_action( 'wp_ajax_woo_optimizer_restore',         [ $this, 'ajax_restore' ] );
+		add_action( 'wp_ajax_woo_optimizer_retry_failed',    [ $this, 'ajax_retry_failed' ] );
+		add_action( 'wp_ajax_woo_optimizer_test_connection', [ $this, 'ajax_test_connection' ] );
 	}
 
 	// -----------------------------------------------------------------------
@@ -82,6 +83,11 @@ class Woo_Image_Optimizer_Admin {
 				'done'       => __( 'All done!', 'woo-image-optimizer' ),
 				'paused'     => __( 'Paused', 'woo-image-optimizer' ),
 				'cronNote'   => __( 'Background cron is processing — checking progress every %ds.', 'woo-image-optimizer' ),
+				'testConn'   => [
+					'testing' => __( 'Testing…', 'woo-image-optimizer' ),
+					'ok'      => __( 'Connected', 'woo-image-optimizer' ),
+					'error'   => __( 'Error', 'woo-image-optimizer' ),
+				],
 			],
 		] );
 	}
@@ -97,7 +103,13 @@ class Woo_Image_Optimizer_Admin {
 			wp_die( 'Unauthorized' );
 		}
 
+		$old_interval = (int) $this->settings->get( 'cron_interval', 120 );
 		$this->settings->save( $_POST );
+		$new_interval = (int) $this->settings->get( 'cron_interval', 120 );
+
+		if ( $old_interval !== $new_interval ) {
+			Woo_Image_Optimizer_Cron::reschedule( $new_interval );
+		}
 
 		wp_safe_redirect( add_query_arg(
 			[ 'page' => 'woo-image-optimizer', 'saved' => '1' ],
@@ -226,6 +238,12 @@ class Woo_Image_Optimizer_Admin {
 							<input type="password" id="wio-api-key" name="api_key" value="<?php echo esc_attr( $s['api_key'] ); ?>" class="regular-text" autocomplete="new-password">
 							<p class="description"><?php esc_html_e( 'Bearer token from Server 2 (WOO_IMG_API_KEY). Keep this secret.', 'woo-image-optimizer' ); ?></p>
 						</div>
+						<div class="wio-field wio-test-connection-row">
+							<button type="button" class="button" id="wio-test-connection">
+								<?php esc_html_e( 'Test Connection', 'woo-image-optimizer' ); ?>
+							</button>
+							<span id="wio-connection-status" class="wio-connection-status"></span>
+						</div>
 					</div>
 
 					<!-- Optimization -->
@@ -252,7 +270,16 @@ class Woo_Image_Optimizer_Admin {
 						<div class="wio-field">
 							<label for="wio-batch-size"><?php esc_html_e( 'Batch Size', 'woo-image-optimizer' ); ?></label>
 							<input type="number" id="wio-batch-size" name="batch_size" value="<?php echo esc_attr( $s['batch_size'] ); ?>" min="1" max="50" style="width:70px">
-							<p class="description"><?php esc_html_e( 'Jobs per cron run. Default 5. Lower if you hit timeouts.', 'woo-image-optimizer' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Jobs per cron run. Default 3. Use 1–2 on shared hosting.', 'woo-image-optimizer' ); ?></p>
+						</div>
+						<div class="wio-field">
+							<label for="wio-cron-interval"><?php esc_html_e( 'Cron Interval', 'woo-image-optimizer' ); ?></label>
+							<select id="wio-cron-interval" name="cron_interval">
+								<option value="60"  <?php selected( (int) $s['cron_interval'], 60  ); ?>><?php esc_html_e( 'Every 1 minute (fast)',        'woo-image-optimizer' ); ?></option>
+								<option value="120" <?php selected( (int) $s['cron_interval'], 120 ); ?>><?php esc_html_e( 'Every 2 minutes (recommended)', 'woo-image-optimizer' ); ?></option>
+								<option value="300" <?php selected( (int) $s['cron_interval'], 300 ); ?>><?php esc_html_e( 'Every 5 minutes (shared host)', 'woo-image-optimizer' ); ?></option>
+							</select>
+							<p class="description"><?php esc_html_e( 'How often the background cron processes images. Use 2–5 min on shared hosting to reduce server load.', 'woo-image-optimizer' ); ?></p>
 						</div>
 						<div class="wio-field">
 							<label>
@@ -378,6 +405,54 @@ class Woo_Image_Optimizer_Admin {
 		wp_send_json_success( [
 			'reset' => $reset,
 			'stats' => $this->queue->get_stats(),
+		] );
+	}
+
+	public function ajax_test_connection(): void {
+		check_ajax_referer( 'woo_img_opt_nonce', 'nonce' );
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( 'Unauthorized', 403 );
+		}
+
+		$api_url = $this->settings->get( 'api_url' );
+		$api_key = $this->settings->get( 'api_key' );
+
+		if ( empty( $api_url ) || empty( $api_key ) ) {
+			wp_send_json_error( [ 'message' => 'Enter API URL and Key first.', 'ms' => 0 ] );
+		}
+
+		$start    = microtime( true );
+		$response = wp_remote_get(
+			trailingslashit( $api_url ) . 'backup/wio-connection-test',
+			[
+				'headers'   => [ 'Authorization' => 'Bearer ' . $api_key ],
+				'timeout'   => 10,
+				'sslverify' => true,
+			]
+		);
+		$elapsed_ms = (int) round( ( microtime( true ) - $start ) * 1000 );
+
+		if ( is_wp_error( $response ) ) {
+			wp_send_json_error( [
+				'message' => 'Unreachable: ' . $response->get_error_message(),
+				'ms'      => $elapsed_ms,
+			] );
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+
+		if ( $code === 401 ) {
+			wp_send_json_error( [
+				'message' => 'Invalid API key (401 Unauthorized).',
+				'ms'      => $elapsed_ms,
+			] );
+		}
+
+		// 404 = server reachable, key valid, backup key doesn't exist — expected.
+		wp_send_json_success( [
+			'message' => 'Connected',
+			'code'    => $code,
+			'ms'      => $elapsed_ms,
 		] );
 	}
 

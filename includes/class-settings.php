@@ -34,6 +34,9 @@ class Woo_Image_Optimizer_Settings {
 		$clean['backup_retention_enabled'] = ! empty( $input['backup_retention_enabled'] );
 		$clean['backup_retention_days']    = max( 1, (int) ( $input['backup_retention_days'] ?? 30 ) );
 
+		$raw_interval = (int) ( $input['cron_interval'] ?? 120 );
+		$clean['cron_interval'] = in_array( $raw_interval, [ 60, 120, 300 ], true ) ? $raw_interval : 120;
+
 		update_option( self::OPTION_KEY, $clean );
 		$this->data = $clean;
 	}
@@ -45,7 +48,8 @@ class Woo_Image_Optimizer_Settings {
 			'webp_quality'              => 82,
 			'max_width'                 => 2048,
 			'max_height'                => 2048,
-			'batch_size'                => 5,
+			'batch_size'                => 3,
+			'cron_interval'             => 120,
 			'auto_optimize'             => true,
 			'backup_retention_enabled'  => false,
 			'backup_retention_days'     => 30,
